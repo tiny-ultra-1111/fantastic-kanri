@@ -40,7 +40,7 @@ Claudeのアーティファクト機能から、Cloudflare Pages + Supabaseで
 5. 画面右上あたりの **Connect** ボタンを押すと、接続に必要な情報がまとめて表示されます
    (見当たらない場合は左メニューの **Project Settings > API Keys** からも確認できます)
    - **Project URL**(例:`https://xxxxxxxx.supabase.co`)
-   - ブラウザ側で使う公開用キー。プロジェクトの世代によって名前が違います
+   - ブラウザ側で使う公開用キー。プロジェクトの世、代によって名前が違います
      - 新しめのプロジェクト:**Publishable key**(`sb_publishable_...`という文字列)
      - 少し前のプロジェクト:**anon / public** キー(`eyJ...`で始まる長い文字列。`Legacy API Keys`タブにあることがあります)
    - どちらのキーでも、この後の`storage.js`はそのまま使えます。**「Secret key」や「service_role」というキーは絶対に使わないでください**(データベースを丸ごと操作できてしまう、サーバー専用の鍵で、ブラウザ用ではありません)
