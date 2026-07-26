@@ -65,16 +65,21 @@ function sortAndAnnotate(list) {
   });
 }
 
-/* 種別ごとの合計人数(イベント単位のサマリー表示に使う) */
+/* 種別ごとの合計人数(イベント単位のサマリー表示に使う)。
+   実際の運用では「未指定」の人も自動的にカウンター扱いになるため、
+   カウンターの合計人数には「カウンター指定席」+「未指定」を含める。 */
 function seatTypeTotals(list) {
   const totals = { vip: 0, counter: 0, stool: 0, undecided: 0 };
   list.forEach((b) => {
     totals[seatTypeOf(b)] += b.count || 0;
   });
-  return totals;
+  return {
+    ...totals,
+    counterOccupancy: totals.counter + totals.undecided,
+  };
 }
 
-/* VIP/カウンターの残り枠を計算(編集中の予約自身は除く) */
+/* VIPの残り枠を計算(編集中の予約自身は除く) */
 function remainingCapacity(list, type, excludeId) {
   const cap = SEAT_TYPES[type].cap;
   if (cap == null) return Infinity;
@@ -82,6 +87,20 @@ function remainingCapacity(list, type, excludeId) {
     .filter((b) => seatTypeOf(b) === type && b.id !== excludeId)
     .reduce((s, b) => s + (b.count || 0), 0);
   return cap - used;
+}
+
+/* カウンターの残り枠(共有プール)を計算。
+   「カウンター指定席」も「未指定」も同じ8席の枠を使う
+   (未指定=座席を指定していないだけで、実際はカウンターに座るため)。
+   編集中の予約自身は除く。 */
+function remainingCounterPool(list, excludeId) {
+  const used = list
+    .filter((b) => {
+      const t = seatTypeOf(b);
+      return (t === "counter" || t === "undecided") && b.id !== excludeId;
+    })
+    .reduce((s, b) => s + (b.count || 0), 0);
+  return SEAT_TYPES.counter.cap - used;
 }
 
 /* カウンターの使用済み座席番号(1〜8)を集計(編集中の予約自身は除く) */
@@ -142,6 +161,7 @@ function useStorage() {
   const persist = useCallback(async (key, value) => {
     try {
       await window.storage.set(key, JSON.stringify(value), true);
+      setError("");
     } catch {
       setError("保存に失敗しました。通信状況を確認して再度お試しください。");
     }
@@ -364,7 +384,7 @@ function SeatSummary({ bookingsForEvent }) {
   return (
     <div style={{ display: "flex", gap: "0.35rem", flexWrap: "wrap" }}>
       <Badge tone="gold">VIP {totals.vip}名</Badge>
-      <Badge tone="gold">カウンター {totals.counter}名</Badge>
+      <Badge tone="gold">カウンター {totals.counterOccupancy}名</Badge>
       {totals.stool > 0 && <Badge tone="muted">丸椅子 {totals.stool}名</Badge>}
     </div>
   );
@@ -593,24 +613,37 @@ function AdminLogin({ adminPin, onRecover, onSuccess, onBack }) {
 
 function ParticipantLogin({ participants, onSuccess, onBack }) {
   const [selectedId, setSelectedId] = useState(null);
+  const [query, setQuery] = useState("");
   const [pin, setPin] = useState("");
   const [err, setErr] = useState("");
 
   const selected = participants.find((p) => p.id === selectedId);
 
   if (!selectedId) {
+    const matches = query.trim()
+      ? participants.filter((p) => p.name.toLowerCase().includes(query.trim().toLowerCase()))
+      : participants;
     return (
       <div style={{ padding: "1.5rem 1.2rem", maxWidth: "420px", margin: "0 auto" }}>
         <TopBar title="出演者ログイン" onBack={onBack} />
         <Panel>
-          <div style={{ color: COLORS.muted, fontSize: "0.85rem", marginBottom: "0.8rem", fontFamily: "'Zen Maru Gothic'" }}>
-            自分の名前を選んでください
-          </div>
+          <Field label="名前で検索">
+            <input
+              style={inputStyle}
+              value={query}
+              onChange={(e) => setQuery(e.target.value)}
+              placeholder="名前を入力してください"
+              autoFocus
+            />
+          </Field>
           {participants.length === 0 && (
             <div style={{ color: COLORS.muted, fontSize: "0.85rem" }}>まだ名簿が登録されていません。管理者にご確認ください。</div>
           )}
+          {participants.length > 0 && matches.length === 0 && (
+            <div style={{ color: COLORS.muted, fontSize: "0.85rem" }}>該当する名前が見つかりません。</div>
+          )}
           <div style={{ display: "flex", flexDirection: "column", gap: "0.5rem" }}>
-            {participants.map((p) => (
+            {matches.map((p) => (
               <button
                 key={p.id}
                 onClick={() => setSelectedId(p.id)}
@@ -685,21 +718,25 @@ function BookingForm({ initial, eventBookings, onSave, onCancel }) {
 
   const list = eventBookings || [];
   const remainingVip = remainingCapacity(list, "vip", initial?.id);
-  const remainingCounter = remainingCapacity(list, "counter", initial?.id);
+  const remainingCounterShared = remainingCounterPool(list, initial?.id);
   const usedSeats = usedCounterSeats(list, initial?.id);
   const n = Number(count) || 1;
 
   const options = [
-    { key: "vip", remaining: remainingVip },
-    { key: "counter", remaining: remainingCounter },
+    { key: "vip", remaining: remainingVip, capLabel: SEAT_TYPES.vip.cap },
+    { key: "counter", remaining: remainingCounterShared, capLabel: SEAT_TYPES.counter.cap },
     { key: "stool", remaining: Infinity },
-    { key: "undecided", remaining: Infinity },
+    { key: "undecided", remaining: remainingCounterShared, capLabel: SEAT_TYPES.counter.cap },
   ];
 
   const submit = () => {
     if (!name.trim()) return;
     if (seatType === "vip" && n > remainingVip) {
       setError(`VIPの残り枠(${remainingVip}名)を超えています。`);
+      return;
+    }
+    if (seatType === "undecided" && n > remainingCounterShared) {
+      setError(`カウンターが満席です(残り${Math.max(remainingCounterShared, 0)}名)。丸椅子を選んでください。`);
       return;
     }
     if (seatType === "counter") {
@@ -739,6 +776,9 @@ function BookingForm({ initial, eventBookings, onSave, onCancel }) {
         />
       </Field>
       <Field label="予約種別">
+        <div style={{ color: COLORS.muted, fontFamily: "'Zen Maru Gothic'", fontSize: "0.75rem", marginBottom: "0.5rem", lineHeight: 1.5 }}>
+          「未指定」はカウンター指定席と同じ8席の枠を共有します(自動的にカウンター席として扱われます)。枠が埋まると「丸椅子」を選んでください。
+        </div>
         <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "0.6rem" }}>
           {options.map((o) => {
             const def = SEAT_TYPES[o.key];
@@ -785,9 +825,9 @@ function BookingForm({ initial, eventBookings, onSave, onCancel }) {
                   </span>
                 )}
                 {def.label}{def.priceLabel && ` (${def.priceLabel})`}
-                {def.cap != null && (
+                {o.capLabel != null && (
                   <div style={{ fontWeight: 400, fontSize: "0.72rem", marginTop: "0.15rem" }}>
-                    残り{Math.max(o.remaining, 0)}/{def.cap}
+                    残り{Math.max(o.remaining, 0)}/{o.capLabel}
                   </div>
                 )}
               </button>
@@ -981,59 +1021,103 @@ const iconBtnStyle = {
 
 /* ---------- 参加者ダッシュボード ---------- */
 
-function ParticipantDashboard({ participant, events, bookings, onUpdateBookings, onLogout }) {
-  const [activeEventId, setActiveEventId] = useState(null);
-  const myEvents = events
-    .filter((e) => (e.assigned || []).includes(participant.id))
-    .sort((a, b) => a.date.localeCompare(b.date));
+function ParticipantSettingsTab({ participant, participants, onUpdateParticipants }) {
+  const self = participants.find((p) => p.id === participant.id) || participant;
+  const [currentPin, setCurrentPin] = useState("");
+  const [newPin, setNewPin] = useState("");
+  const [confirmPin, setConfirmPin] = useState("");
+  const [error, setError] = useState("");
+  const [saved, setSaved] = useState(false);
 
-  const activeEvent = myEvents.find((e) => e.id === activeEventId);
-
-  const addBooking = (b) => onUpdateBookings([...bookings, b]);
-  const updateBooking = (b) => onUpdateBookings(bookings.map((x) => (x.id === b.id ? b : x)));
-  const deleteBooking = (id) => onUpdateBookings(bookings.filter((x) => x.id !== id));
-
-  if (activeEvent) {
-    return (
-      <div style={{ padding: "1.5rem 1.2rem", maxWidth: "620px", margin: "0 auto" }}>
-        <TopBar title={formatDate(activeEvent.date)} onBack={() => setActiveEventId(null)} onLogout={onLogout} />
-        <div style={{ color: COLORS.cream, fontFamily: "'Zen Maru Gothic'", fontWeight: 600, marginBottom: "1rem" }}>
-          {activeEvent.note && <span style={{ color: COLORS.gold, fontWeight: 500 }}>{activeEvent.note}</span>}
-        </div>
-        <BookingList event={activeEvent} bookings={bookings} onAdd={addBooking} onUpdate={updateBooking} onDelete={deleteBooking} />
-      </div>
-    );
-  }
+  const submit = () => {
+    setSaved(false);
+    if (currentPin !== self.pin) {
+      setError("現在のPINが違います");
+      return;
+    }
+    if (!newPin.trim()) {
+      setError("新しいPINを入力してください");
+      return;
+    }
+    if (newPin !== confirmPin) {
+      setError("新しいPIN(確認)が一致しません");
+      return;
+    }
+    onUpdateParticipants(participants.map((p) => (p.id === self.id ? { ...p, pin: newPin.trim() } : p)));
+    setCurrentPin("");
+    setNewPin("");
+    setConfirmPin("");
+    setError("");
+    setSaved(true);
+  };
 
   return (
-    <div style={{ padding: "1.5rem 1.2rem", maxWidth: "620px", margin: "0 auto" }}>
+    <Panel>
+      <div style={{ color: COLORS.cream, fontFamily: "'Zen Maru Gothic'", fontWeight: 600, marginBottom: "0.9rem" }}>
+        {self.name} さんの個人PIN変更
+      </div>
+      <Field label="現在のPIN">
+        <input style={pinInputStyle} value={currentPin} onChange={(e) => { setCurrentPin(e.target.value); setError(""); }} inputMode="numeric" type="password" />
+      </Field>
+      <Field label="新しいPIN">
+        <input style={pinInputStyle} value={newPin} onChange={(e) => { setNewPin(e.target.value); setError(""); }} inputMode="numeric" />
+      </Field>
+      <Field label="新しいPIN(確認)">
+        <input style={pinInputStyle} value={confirmPin} onChange={(e) => { setConfirmPin(e.target.value); setError(""); }} inputMode="numeric" />
+      </Field>
+      {error && <div style={{ color: COLORS.danger, fontSize: "0.8rem", marginBottom: "0.8rem" }}>{error}</div>}
+      <Button onClick={submit}>変更を保存</Button>
+      {saved && <div style={{ color: COLORS.gold, fontSize: "0.8rem", marginTop: "0.6rem", fontFamily: "'Zen Maru Gothic'" }}>変更しました</div>}
+    </Panel>
+  );
+}
+
+function ParticipantDashboard({ participant, participants, onUpdateParticipants, events, bookings, onUpdateBookings, onLogout }) {
+  const [tab, setTab] = useState("bookings");
+  const myEvents = events.filter((e) => (e.assigned || []).includes(participant.id));
+
+  const tabs = [
+    { key: "bookings", label: "予約管理" },
+    { key: "settings", label: "設定" },
+  ];
+
+  return (
+    <div style={{ padding: "1.5rem 1.2rem", maxWidth: "680px", margin: "0 auto" }}>
       <TopBar title={`${participant.name} さん`} onLogout={onLogout} />
-      {myEvents.length === 0 && (
-        <div style={{ color: COLORS.muted, fontFamily: "'Zen Maru Gothic'", fontSize: "0.9rem" }}>
-          担当の日程がまだ割り振られていません。管理者にご確認ください。
-        </div>
-      )}
-      {myEvents.map((e) => {
-        const count = bookings.filter((b) => b.eventId === e.id).length;
-        return (
-          <TicketCard
-            key={e.id}
-            left={
-              <div>
-                <div style={{ fontFamily: "'Zen Maru Gothic'", color: COLORS.gold, fontSize: "0.85rem" }}>{formatDate(e.date)}</div>
-                {e.note && (
-                  <div style={{ fontFamily: "'Zen Maru Gothic'", fontWeight: 600, color: COLORS.gold }}>{e.note}</div>
-                )}
-              </div>
-            }
-            right={<Badge tone="muted">予約 {count}件</Badge>}
+      <div style={{ display: "flex", gap: "0.4rem", marginBottom: "1.2rem", flexWrap: "wrap" }}>
+        {tabs.map((t) => (
+          <button
+            key={t.key}
+            onClick={() => setTab(t.key)}
+            style={{
+              background: tab === t.key ? COLORS.gold : "transparent",
+              color: tab === t.key ? COLORS.cream : COLORS.muted,
+              border: `1px solid ${tab === t.key ? COLORS.gold : COLORS.line}`,
+              borderRadius: "999px",
+              padding: "0.4rem 0.9rem",
+              fontFamily: "'Zen Maru Gothic'",
+              fontSize: "0.82rem",
+              fontWeight: 600,
+              cursor: "pointer",
+            }}
           >
-            <div style={{ marginTop: "0.7rem" }}>
-              <Button onClick={() => setActiveEventId(e.id)}>開く</Button>
-            </div>
-          </TicketCard>
-        );
-      })}
+            {t.label}
+          </button>
+        ))}
+      </div>
+
+      {tab === "bookings" && (
+        myEvents.length === 0 ? (
+          <div style={{ color: COLORS.muted, fontFamily: "'Zen Maru Gothic'", fontSize: "0.9rem" }}>
+            担当の日程がまだ割り振られていません。管理者にご確認ください。
+          </div>
+        ) : (
+          <AllBookingsTab events={myEvents} participants={participants} bookings={bookings} onUpdateBookings={onUpdateBookings} />
+        )
+      )}
+      {tab === "settings" && (
+        <ParticipantSettingsTab participant={participant} participants={participants} onUpdateParticipants={onUpdateParticipants} />
+      )}
     </div>
   );
 }
@@ -1174,19 +1258,113 @@ function AssignModal({ event, participants, onToggle, onClose }) {
   );
 }
 
+function monthKeyOf(dateStr) {
+  return dateStr.slice(0, 7);
+}
+function monthLabelOf(key) {
+  const [y, m] = key.split("-");
+  return `${y}年${parseInt(m, 10)}月`;
+}
+
+const WEEKDAY_LABELS = ["日", "月", "火", "水", "木", "金", "土"];
+
+function pad2(n) {
+  return String(n).padStart(2, "0");
+}
+
+/* タップで複数日を選択(もう一度タップで解除)できるカレンダー */
+function MiniCalendar({ year, month, selectedDates, onToggleDate, onPrevMonth, onNextMonth }) {
+  const firstWeekday = new Date(year, month, 1).getDay();
+  const daysInMonth = new Date(year, month + 1, 0).getDate();
+  const cells = [];
+  for (let i = 0; i < firstWeekday; i++) cells.push(null);
+  for (let d = 1; d <= daysInMonth; d++) cells.push(d);
+
+  return (
+    <div>
+      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "0.6rem" }}>
+        <button onClick={onPrevMonth} style={iconBtnStyle}>← 前の月</button>
+        <div style={{ color: COLORS.gold, fontFamily: "'Zen Maru Gothic'", fontWeight: 700 }}>
+          {year}年{month + 1}月
+        </div>
+        <button onClick={onNextMonth} style={iconBtnStyle}>次の月 →</button>
+      </div>
+      <div style={{ display: "grid", gridTemplateColumns: "repeat(7, 1fr)", gap: "0.3rem", marginBottom: "0.3rem" }}>
+        {WEEKDAY_LABELS.map((w) => (
+          <div key={w} style={{ textAlign: "center", color: COLORS.muted, fontFamily: "'Zen Maru Gothic'", fontSize: "0.75rem" }}>
+            {w}
+          </div>
+        ))}
+      </div>
+      <div style={{ display: "grid", gridTemplateColumns: "repeat(7, 1fr)", gap: "0.3rem" }}>
+        {cells.map((d, i) => {
+          if (d === null) return <div key={i} />;
+          const dateStr = `${year}-${pad2(month + 1)}-${pad2(d)}`;
+          const selected = selectedDates.includes(dateStr);
+          return (
+            <button
+              key={i}
+              onClick={() => onToggleDate(dateStr)}
+              style={{
+                aspectRatio: "1",
+                background: selected ? COLORS.gold : "transparent",
+                color: COLORS.cream,
+                border: `1px solid ${selected ? COLORS.gold : COLORS.line}`,
+                borderRadius: "6px",
+                fontFamily: "'Zen Maru Gothic'",
+                fontSize: "0.85rem",
+                cursor: "pointer",
+              }}
+            >
+              {d}
+            </button>
+          );
+        })}
+      </div>
+    </div>
+  );
+}
+
 function EventsTab({ events, participants, bookings, onUpdateEvents, onUpdateBookings }) {
   const [adding, setAdding] = useState(false);
-  const [date, setDate] = useState("");
+  const today = new Date();
+  const [calYear, setCalYear] = useState(today.getFullYear());
+  const [calMonth, setCalMonth] = useState(today.getMonth());
+  const [selectedDates, setSelectedDates] = useState([]);
   const [note, setNote] = useState("");
   const [assignEventId, setAssignEventId] = useState(null);
   const [viewingId, setViewingId] = useState(null);
   const [searchQuery, setSearchQuery] = useState("");
   const [deleteEventId, setDeleteEventId] = useState(null);
+  const [editingEvent, setEditingEvent] = useState(false);
+  const [editDate, setEditDate] = useState("");
+  const [editNote, setEditNote] = useState("");
+
+  const sorted = [...events].sort((a, b) => a.date.localeCompare(b.date));
+  const monthKeys = Array.from(new Set(sorted.map((e) => monthKeyOf(e.date)))).sort((a, b) => b.localeCompare(a));
+  const [selectedMonth, setSelectedMonth] = useState(() => monthKeys[0] || "");
+
+  const toggleDate = (dateStr) => {
+    setSelectedDates((prev) => (prev.includes(dateStr) ? prev.filter((d) => d !== dateStr) : [...prev, dateStr]));
+  };
+
+  const changeMonth = (delta) => {
+    let m = calMonth + delta;
+    let y = calYear;
+    if (m < 0) { m = 11; y -= 1; }
+    if (m > 11) { m = 0; y += 1; }
+    setCalMonth(m);
+    setCalYear(y);
+  };
 
   const addEvent = () => {
-    if (!date) return;
-    onUpdateEvents([...events, { id: uid(), date, title: EVENT_TITLE, note: note.trim(), assigned: [] }]);
-    setDate("");
+    const existingDates = new Set(events.map((e) => e.date));
+    const validDates = Array.from(new Set(selectedDates)).filter((d) => !existingDates.has(d));
+    if (validDates.length === 0) return;
+    const newEvents = validDates.map((d) => ({ id: uid(), date: d, title: EVENT_TITLE, note: note.trim(), assigned: [] }));
+    onUpdateEvents([...events, ...newEvents]);
+    setSelectedMonth(monthKeyOf(validDates.sort()[0]));
+    setSelectedDates([]);
     setNote("");
     setAdding(false);
   };
@@ -1210,7 +1388,10 @@ function EventsTab({ events, participants, bookings, onUpdateEvents, onUpdateBoo
     if (viewingId === id) setViewingId(null);
   };
 
-  const sorted = [...events].sort((a, b) => a.date.localeCompare(b.date));
+  const updateEventDetails = (id, patch) => {
+    onUpdateEvents(events.map((e) => (e.id === id ? { ...e, ...patch } : e)));
+  };
+
   const assignEvent = events.find((e) => e.id === assignEventId);
   const viewingEvent = events.find((e) => e.id === viewingId);
   const deleteEventTarget = events.find((e) => e.id === deleteEventId);
@@ -1223,13 +1404,52 @@ function EventsTab({ events, participants, bookings, onUpdateEvents, onUpdateBoo
     const assignedNames = participants.filter((p) => (viewingEvent.assigned || []).includes(p.id));
     return (
       <div>
-        <button onClick={() => setViewingId(null)} style={{ ...iconBtnStyle, marginBottom: "1rem" }}>← 日程一覧に戻る</button>
-        <div style={{ marginBottom: "0.3rem", fontFamily: "'Zen Maru Gothic'", color: COLORS.gold, fontSize: "0.9rem" }}>
-          {formatDate(viewingEvent.date)}
-        </div>
-        {viewingEvent.note && (
-          <div style={{ marginBottom: "0.6rem", fontFamily: "'Zen Maru Gothic'", fontWeight: 600, color: COLORS.gold }}>{viewingEvent.note}</div>
+        <button onClick={() => { setViewingId(null); setEditingEvent(false); }} style={{ ...iconBtnStyle, marginBottom: "1rem" }}>← 日程一覧に戻る</button>
+
+        {editingEvent ? (
+          <div style={{ marginBottom: "1rem" }}>
+            <Panel>
+              <Field label="日付">
+                <input style={inputStyle} type="date" value={editDate} onChange={(e) => setEditDate(e.target.value)} />
+              </Field>
+              <Field label="備考(任意)">
+                <input style={inputStyle} value={editNote} onChange={(e) => setEditNote(e.target.value)} />
+              </Field>
+              <div style={{ display: "flex", gap: "0.6rem" }}>
+                <Button
+                  onClick={() => {
+                    if (!editDate) return;
+                    updateEventDetails(viewingEvent.id, { date: editDate, note: editNote.trim() });
+                    setEditingEvent(false);
+                  }}
+                >
+                  保存する
+                </Button>
+                <Button variant="ghost" onClick={() => setEditingEvent(false)}>キャンセル</Button>
+              </div>
+            </Panel>
+          </div>
+        ) : (
+          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", marginBottom: "0.6rem" }}>
+            <div>
+              <div style={{ fontFamily: "'Zen Maru Gothic'", color: COLORS.gold, fontSize: "0.9rem" }}>{formatDate(viewingEvent.date)}</div>
+              {viewingEvent.note && (
+                <div style={{ fontFamily: "'Zen Maru Gothic'", fontWeight: 600, color: COLORS.gold }}>{viewingEvent.note}</div>
+              )}
+            </div>
+            <button
+              onClick={() => {
+                setEditDate(viewingEvent.date);
+                setEditNote(viewingEvent.note || "");
+                setEditingEvent(true);
+              }}
+              style={iconBtnStyle}
+            >
+              日程を編集
+            </button>
+          </div>
         )}
+
         <div style={{ display: "flex", flexWrap: "wrap", gap: "0.35rem", alignItems: "center", marginBottom: "1rem" }}>
           {assignedNames.length === 0 && (
             <span style={{ color: COLORS.muted, fontFamily: "'Zen Maru Gothic'", fontSize: "0.8rem" }}>担当者は未設定です</span>
@@ -1252,39 +1472,72 @@ function EventsTab({ events, participants, bookings, onUpdateEvents, onUpdateBoo
     );
   }
 
+  const searching = !!searchQuery.trim();
+  const visibleEvents = searching
+    ? sorted.filter((e) => {
+        const q = searchQuery.trim().toLowerCase();
+        return e.date.includes(q) || formatDate(e.date).toLowerCase().includes(q) || (e.note || "").toLowerCase().includes(q);
+      })
+    : sorted.filter((e) => monthKeyOf(e.date) === selectedMonth);
+
   return (
     <div>
       {!adding && <Button onClick={() => setAdding(true)}>+ 日程を追加</Button>}
       {adding && (
         <div style={{ margin: "0.9rem 0" }}>
           <Panel>
-            <Field label="日付">
-              <input style={inputStyle} type="date" value={date} onChange={(e) => setDate(e.target.value)} />
+            <Field label={`日付をタップして選択(${selectedDates.length}件選択中・もう一度タップで解除)`}>
+              <MiniCalendar
+                year={calYear}
+                month={calMonth}
+                selectedDates={selectedDates}
+                onToggleDate={toggleDate}
+                onPrevMonth={() => changeMonth(-1)}
+                onNextMonth={() => changeMonth(1)}
+              />
+              {selectedDates.length > 0 && (
+                <div style={{ display: "flex", flexWrap: "wrap", gap: "0.35rem", marginTop: "0.7rem" }}>
+                  {[...selectedDates].sort().map((d) => (
+                    <Badge key={d} tone="gold">{formatDate(d)}</Badge>
+                  ))}
+                </div>
+              )}
             </Field>
-            <Field label="備考(任意・例:○○さんバースデー)">
+            <Field label="備考(任意・すべての日程に共通で入ります)">
               <input style={inputStyle} value={note} onChange={(e) => setNote(e.target.value)} placeholder="通常公演なら空欄でOK" />
             </Field>
             <div style={{ display: "flex", gap: "0.6rem" }}>
               <Button onClick={addEvent}>追加する</Button>
-              <Button variant="ghost" onClick={() => setAdding(false)}>キャンセル</Button>
+              <Button variant="ghost" onClick={() => { setAdding(false); setSelectedDates([]); setNote(""); }}>キャンセル</Button>
             </div>
           </Panel>
         </div>
       )}
 
-      <Field label="日程で検索">
+      <Field label="日程で検索(全月から検索します)">
         <input style={inputStyle} placeholder="例:8/10 や バースデー" value={searchQuery} onChange={(e) => setSearchQuery(e.target.value)} />
       </Field>
 
+      {!searching && monthKeys.length > 0 && (
+        <Field label="表示する月">
+          <select
+            style={inputStyle}
+            value={selectedMonth}
+            onChange={(e) => setSelectedMonth(e.target.value)}
+          >
+            {monthKeys.map((k) => (
+              <option key={k} value={k}>{monthLabelOf(k)}</option>
+            ))}
+          </select>
+        </Field>
+      )}
+
       <div style={{ marginTop: "1rem" }}>
         {sorted.length === 0 && <div style={{ color: COLORS.muted, fontFamily: "'Zen Maru Gothic'", fontSize: "0.9rem" }}>まだ日程がありません。</div>}
-        {sorted
-          .filter((e) => {
-            if (!searchQuery.trim()) return true;
-            const q = searchQuery.trim().toLowerCase();
-            return e.date.includes(q) || formatDate(e.date).toLowerCase().includes(q) || (e.note || "").toLowerCase().includes(q);
-          })
-          .map((e) => {
+        {sorted.length > 0 && visibleEvents.length === 0 && (
+          <div style={{ color: COLORS.muted, fontFamily: "'Zen Maru Gothic'", fontSize: "0.9rem" }}>該当する日程がありません。</div>
+        )}
+        {visibleEvents.map((e) => {
           const eventBookings = bookings.filter((b) => b.eventId === e.id);
           const assignedNames = participants.filter((p) => (e.assigned || []).includes(p.id));
           return (
@@ -1365,6 +1618,7 @@ function RosterTab({ participants, onUpdateParticipants }) {
   const [name, setName] = useState("");
   const [pin, setPin] = useState("");
   const [type, setType] = useState("regular");
+  const [searchQuery, setSearchQuery] = useState("");
 
   const resetForm = () => {
     setName("");
@@ -1374,8 +1628,12 @@ function RosterTab({ participants, onUpdateParticipants }) {
     setEditingId(null);
   };
 
+  const isDuplicateName = name.trim()
+    ? participants.some((p) => p.id !== editingId && p.name.trim() === name.trim())
+    : false;
+
   const save = () => {
-    if (!name.trim() || !pin.trim()) return;
+    if (!name.trim() || !pin.trim() || isDuplicateName) return;
     if (editingId) {
       onUpdateParticipants(
         participants.map((p) => (p.id === editingId ? { ...p, name: name.trim(), pin: pin.trim(), type } : p))
@@ -1396,6 +1654,8 @@ function RosterTab({ participants, onUpdateParticipants }) {
 
   const remove = (id) => onUpdateParticipants(participants.filter((p) => p.id !== id));
 
+  const filtered = participants.filter((p) => p.name.toLowerCase().includes(searchQuery.trim().toLowerCase()));
+
   return (
     <div>
       {!adding && <Button onClick={() => setAdding(true)}>+ 出演者を追加</Button>}
@@ -1405,6 +1665,11 @@ function RosterTab({ participants, onUpdateParticipants }) {
             <Field label="名前">
               <input style={inputStyle} value={name} onChange={(e) => setName(e.target.value)} />
             </Field>
+            {isDuplicateName && (
+              <div style={{ color: COLORS.danger, fontSize: "0.8rem", marginTop: "-0.5rem", marginBottom: "0.8rem" }}>
+                同じ名前のユーザーが存在します
+              </div>
+            )}
             <Field label="個人PIN(4桁など)">
               <input style={inputStyle} value={pin} onChange={(e) => setPin(e.target.value)} inputMode="numeric" />
             </Field>
@@ -1415,16 +1680,20 @@ function RosterTab({ participants, onUpdateParticipants }) {
               </div>
             </Field>
             <div style={{ display: "flex", gap: "0.6rem" }}>
-              <Button onClick={save}>{editingId ? "更新する" : "追加する"}</Button>
+              <Button onClick={save} disabled={isDuplicateName}>{editingId ? "更新する" : "追加する"}</Button>
               <Button variant="ghost" onClick={resetForm}>キャンセル</Button>
             </div>
           </Panel>
         </div>
       )}
 
+      <Field label="名前で検索">
+        <input style={inputStyle} placeholder="例:山田" value={searchQuery} onChange={(e) => setSearchQuery(e.target.value)} />
+      </Field>
+
       <div style={{ marginTop: "1rem" }}>
-        {participants.length === 0 && <div style={{ color: COLORS.muted, fontFamily: "'Zen Maru Gothic'", fontSize: "0.9rem" }}>まだ登録がありません。</div>}
-        {participants.map((p) => (
+        {filtered.length === 0 && <div style={{ color: COLORS.muted, fontFamily: "'Zen Maru Gothic'", fontSize: "0.9rem" }}>該当する出演者がいません。</div>}
+        {filtered.map((p) => (
           <TicketCard
             key={p.id}
             left={
@@ -1692,6 +1961,8 @@ export default function App() {
       {!store.loading && screen === "participant" && participant && (
         <ParticipantDashboard
           participant={participant}
+          participants={store.participants}
+          onUpdateParticipants={store.updateParticipants}
           events={store.events}
           bookings={store.bookings}
           onUpdateBookings={store.updateBookings}
