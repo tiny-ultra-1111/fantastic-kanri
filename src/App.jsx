@@ -112,6 +112,30 @@ function usedCounterSeats(list, excludeId) {
   return used;
 }
 
+/* 「未指定」の予約に、カウンター指定席で埋まっていない番号を先着順で自動的に割り当てる。
+   カウンター指定席が増える・減るたびに、この計算をその場でやり直すことで
+   番号が自動的にずれていく(データとしては保存しない・常に計算し直す)。
+   割り当てられる枠がなければ、自動的に「丸椅子」扱いにする。 */
+function computeUndecidedAssignments(list) {
+  const reserved = usedCounterSeats(list);
+  let available = [1, 2, 3, 4, 5, 6, 7, 8].filter((n) => !reserved.has(n));
+  const undecidedBookings = list
+    .filter((b) => seatTypeOf(b) === "undecided")
+    .sort((a, b) => (a.createdAt || 0) - (b.createdAt || 0));
+
+  const assignments = new Map();
+  undecidedBookings.forEach((b) => {
+    const need = b.count || 0;
+    if (need > 0 && available.length >= need) {
+      assignments.set(b.id, { seats: available.slice(0, need), autoStool: false });
+      available = available.slice(need);
+    } else {
+      assignments.set(b.id, { seats: [], autoStool: true });
+    }
+  });
+  return assignments;
+}
+
 /* 指定の開始番号からcount席分、連番で空いているかを判定 */
 function canFitConsecutive(used, start, count) {
   for (let n = start; n < start + count; n++) {
@@ -890,9 +914,6 @@ function BookingForm({ initial, eventBookings, onSave, onCancel }) {
             )}
           </div>
         )}
-        <div style={{ color: COLORS.muted, fontFamily: "'Zen Maru Gothic'", fontSize: "0.75rem", marginBottom: "0.5rem", lineHeight: 1.5 }}>
-          「未指定」はカウンター指定席と同じ8席の枠を共有します(自動的にカウンター席として扱われます)。枠が埋まると「丸椅子」を選んでください。
-        </div>
         <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "0.6rem" }}>
           {options.map((o) => {
             const def = SEAT_TYPES[o.key];
@@ -1035,6 +1056,7 @@ function BookingList({ event, bookings, onAdd, onUpdate, onDelete }) {
   const [deleteTargetId, setDeleteTargetId] = useState(null);
   const rawList = bookings.filter((b) => b.eventId === event.id);
   const list = sortAndAnnotate(rawList);
+  const undecidedAssignments = computeUndecidedAssignments(rawList);
   const deleteTarget = rawList.find((b) => b.id === deleteTargetId);
 
   return (
@@ -1092,11 +1114,28 @@ function BookingList({ event, bookings, onAdd, onUpdate, onDelete }) {
             }
           >
             <div style={{ marginTop: "0.5rem", display: "flex", gap: "0.5rem", flexWrap: "wrap", alignItems: "center" }}>
-              <Badge tone={b.seatType === "vip" || b.seatType === "counter" ? "gold" : "muted"}>
-                {SEAT_TYPES[seatTypeOf(b)].label}
-                {seatTypeOf(b) === "counter" && b.counterSeats && b.counterSeats.length > 0 &&
-                  ` ${b.counterSeats.map((n) => CIRCLED_NUMBERS[n - 1]).join("")}`}
-              </Badge>
+              {seatTypeOf(b) === "undecided" ? (
+                (() => {
+                  const a = undecidedAssignments.get(b.id);
+                  if (a && a.autoStool) {
+                    return <Badge tone="muted">丸椅子(自動・満席のため)</Badge>;
+                  }
+                  if (a && a.seats.length > 0) {
+                    return (
+                      <Badge tone="gold">
+                        カウンター {a.seats.map((n) => CIRCLED_NUMBERS[n - 1]).join("")}(指定無し)
+                      </Badge>
+                    );
+                  }
+                  return <Badge tone="muted">未指定</Badge>;
+                })()
+              ) : (
+                <Badge tone={b.seatType === "vip" || b.seatType === "counter" ? "gold" : "muted"}>
+                  {SEAT_TYPES[seatTypeOf(b)].label}
+                  {seatTypeOf(b) === "counter" && b.counterSeats && b.counterSeats.length > 0 &&
+                    ` ${b.counterSeats.map((n) => CIRCLED_NUMBERS[n - 1]).join("")}`}
+                </Badge>
+              )}
               {b.seatNote && <Badge tone="muted">{b.seatNote}</Badge>}
             </div>
             {b.notes && (
