@@ -39,7 +39,7 @@ const SEAT_TYPES = {
   vip: { label: "VIP", priceLabel: "+¥500", cap: 4, order: 0 },
   counter: { label: "カウンター指定席", priceLabel: "+¥500", cap: 8, order: 1 },
   stool: { label: "丸椅子", priceLabel: "", cap: null, order: 2 },
-  undecided: { label: "未指定", priceLabel: "", cap: null, order: 3 },
+  undecided: { label: "未指定", priceLabel: "", cap: null, order: 1 },
 };
 
 const CIRCLED_NUMBERS = ["①", "②", "③", "④", "⑤", "⑥", "⑦", "⑧"];
@@ -48,35 +48,101 @@ function seatTypeOf(b) {
   return SEAT_TYPES[b.seatType] ? b.seatType : "undecided";
 }
 
+/* カウンターの使用済み座席番号(1〜8)を集計(編集中の予約自身は除く)。
+   カウンター指定席(番号を指定した予約)だけを対象にする。 */
+function usedCounterSeats(list, excludeId) {
+  const used = new Set();
+  list
+    .filter((b) => seatTypeOf(b) === "counter" && b.id !== excludeId)
+    .forEach((b) => (b.counterSeats || []).forEach((n) => used.add(n)));
+  return used;
+}
+
+/* 「未指定」の予約に、カウンター指定席で埋まっていない番号を先着順で自動的に割り当てる。
+   カウンター指定席が増える・減るたびに、この計算をその場でやり直すことで
+   番号が自動的にずれていく(データとしては保存しない・常に計算し直す)。
+   人数分の枠が足りない場合は、入りきった分だけ座席番号を割り当て、
+   残りは自動的に「丸椅子」扱い(overflow)にする(1組の予約が両方にまたがることがある)。 */
+function computeUndecidedAssignments(list) {
+  const reserved = usedCounterSeats(list);
+  let available = [1, 2, 3, 4, 5, 6, 7, 8].filter((n) => !reserved.has(n));
+  const undecidedBookings = list
+    .filter((b) => seatTypeOf(b) === "undecided")
+    .sort((a, b) => (a.createdAt || 0) - (b.createdAt || 0));
+
+  const assignments = new Map();
+  undecidedBookings.forEach((b) => {
+    const need = b.count || 0;
+    const take = Math.min(need, available.length);
+    const seats = available.slice(0, take);
+    available = available.slice(take);
+    assignments.set(b.id, { seats, overflow: need - take });
+  });
+  return assignments;
+}
+
 /* 予約一覧の並び順:
-   VIP→カウンター→丸椅子→未指定。
-   カウンターは座席番号の若い順、それ以外は先着(登録)順。 */
+   VIP → (カウンター指定席+未指定のうちカウンターに座る分を番号順に混ぜて) → 丸椅子(はみ出し分含む)。
+   伝票を書く順番(VIP→カウンター1〜8→丸椅子)に合わせている。 */
 function sortAndAnnotate(list) {
+  const assignments = computeUndecidedAssignments(list);
+
+  const groupOf = (b) => {
+    const t = seatTypeOf(b);
+    if (t === "vip") return 0;
+    if (t === "counter") return 1;
+    if (t === "undecided") {
+      const a = assignments.get(b.id);
+      return a && a.seats.length > 0 ? 1 : 2;
+    }
+    return 2; // 丸椅子(旧データ含む)
+  };
+  const seatKeyOf = (b) => {
+    const t = seatTypeOf(b);
+    if (t === "counter") {
+      return Math.min(...(b.counterSeats && b.counterSeats.length ? b.counterSeats : [99]));
+    }
+    if (t === "undecided") {
+      const a = assignments.get(b.id);
+      if (a && a.seats.length > 0) return Math.min(...a.seats);
+    }
+    return 99;
+  };
+
   return [...list].sort((a, b) => {
-    const oa = SEAT_TYPES[seatTypeOf(a)].order;
-    const ob = SEAT_TYPES[seatTypeOf(b)].order;
-    if (oa !== ob) return oa - ob;
-    if (seatTypeOf(a) === "counter") {
-      const na = Math.min(...(a.counterSeats && a.counterSeats.length ? a.counterSeats : [99]));
-      const nb = Math.min(...(b.counterSeats && b.counterSeats.length ? b.counterSeats : [99]));
-      if (na !== nb) return na - nb;
+    const ga = groupOf(a);
+    const gb = groupOf(b);
+    if (ga !== gb) return ga - gb;
+    if (ga === 1) {
+      const ka = seatKeyOf(a);
+      const kb = seatKeyOf(b);
+      if (ka !== kb) return ka - kb;
     }
     return (a.createdAt || 0) - (b.createdAt || 0);
   });
 }
 
 /* 種別ごとの合計人数(イベント単位のサマリー表示に使う)。
-   実際の運用では「未指定」の人も自動的にカウンター扱いになるため、
-   カウンターの合計人数には「カウンター指定席」+「未指定」を含める。 */
+   「未指定」のうちカウンターに座れた人数はカウンターの合計に、
+   はみ出した人数は丸椅子の合計に含める。 */
 function seatTypeTotals(list) {
-  const totals = { vip: 0, counter: 0, stool: 0, undecided: 0 };
+  const totals = { vip: 0, counter: 0, stool: 0 };
+  const assignments = computeUndecidedAssignments(list);
   list.forEach((b) => {
-    totals[seatTypeOf(b)] += b.count || 0;
+    const t = seatTypeOf(b);
+    if (t === "vip") {
+      totals.vip += b.count || 0;
+    } else if (t === "counter") {
+      totals.counter += b.count || 0;
+    } else if (t === "undecided") {
+      const a = assignments.get(b.id) || { seats: [], overflow: b.count || 0 };
+      totals.counter += a.seats.length;
+      totals.stool += a.overflow;
+    } else {
+      totals.stool += b.count || 0;
+    }
   });
-  return {
-    ...totals,
-    counterOccupancy: totals.counter + totals.undecided,
-  };
+  return { ...totals, counterOccupancy: totals.counter };
 }
 
 /* VIPの残り枠を計算(編集中の予約自身は除く) */
@@ -89,51 +155,13 @@ function remainingCapacity(list, type, excludeId) {
   return cap - used;
 }
 
-/* カウンターの残り枠(共有プール)を計算。
-   「カウンター指定席」も「未指定」も同じ8席の枠を使う
-   (未指定=座席を指定していないだけで、実際はカウンターに座るため)。
-   編集中の予約自身は除く。 */
-function remainingCounterPool(list, excludeId) {
+/* カウンター指定席(番号予約)の残り枠。実際に番号を予約した分だけを数える
+   (「未指定」は上限なく選べるため、ここには含めない)。 */
+function remainingExplicitCounter(list, excludeId) {
   const used = list
-    .filter((b) => {
-      const t = seatTypeOf(b);
-      return (t === "counter" || t === "undecided") && b.id !== excludeId;
-    })
+    .filter((b) => seatTypeOf(b) === "counter" && b.id !== excludeId)
     .reduce((s, b) => s + (b.count || 0), 0);
   return SEAT_TYPES.counter.cap - used;
-}
-
-/* カウンターの使用済み座席番号(1〜8)を集計(編集中の予約自身は除く) */
-function usedCounterSeats(list, excludeId) {
-  const used = new Set();
-  list
-    .filter((b) => seatTypeOf(b) === "counter" && b.id !== excludeId)
-    .forEach((b) => (b.counterSeats || []).forEach((n) => used.add(n)));
-  return used;
-}
-
-/* 「未指定」の予約に、カウンター指定席で埋まっていない番号を先着順で自動的に割り当てる。
-   カウンター指定席が増える・減るたびに、この計算をその場でやり直すことで
-   番号が自動的にずれていく(データとしては保存しない・常に計算し直す)。
-   割り当てられる枠がなければ、自動的に「丸椅子」扱いにする。 */
-function computeUndecidedAssignments(list) {
-  const reserved = usedCounterSeats(list);
-  let available = [1, 2, 3, 4, 5, 6, 7, 8].filter((n) => !reserved.has(n));
-  const undecidedBookings = list
-    .filter((b) => seatTypeOf(b) === "undecided")
-    .sort((a, b) => (a.createdAt || 0) - (b.createdAt || 0));
-
-  const assignments = new Map();
-  undecidedBookings.forEach((b) => {
-    const need = b.count || 0;
-    if (need > 0 && available.length >= need) {
-      assignments.set(b.id, { seats: available.slice(0, need), autoStool: false });
-      available = available.slice(need);
-    } else {
-      assignments.set(b.id, { seats: [], autoStool: true });
-    }
-  });
-  return assignments;
 }
 
 /* 指定の開始番号からcount席分、連番で空いているかを判定 */
@@ -833,25 +861,20 @@ function BookingForm({ initial, eventBookings, onSave, onCancel }) {
 
   const list = eventBookings || [];
   const remainingVip = remainingCapacity(list, "vip", initial?.id);
-  const remainingCounterShared = remainingCounterPool(list, initial?.id);
+  const remainingCounterExplicit = remainingExplicitCounter(list, initial?.id);
   const usedSeats = usedCounterSeats(list, initial?.id);
   const n = Number(count) || 1;
 
   const options = [
     { key: "vip", remaining: remainingVip, capLabel: SEAT_TYPES.vip.cap },
-    { key: "counter", remaining: remainingCounterShared, capLabel: SEAT_TYPES.counter.cap },
-    { key: "stool", remaining: Infinity },
-    { key: "undecided", remaining: remainingCounterShared, capLabel: SEAT_TYPES.counter.cap },
+    { key: "counter", remaining: remainingCounterExplicit, capLabel: SEAT_TYPES.counter.cap },
+    { key: "undecided", remaining: Infinity },
   ];
 
   const submit = () => {
     if (!name.trim()) return;
     if (seatType === "vip" && n > remainingVip) {
       setError(`VIPの残り枠(${remainingVip}名)を超えています。`);
-      return;
-    }
-    if (seatType === "undecided" && n > remainingCounterShared) {
-      setError(`カウンターが満席です(残り${Math.max(remainingCounterShared, 0)}名)。丸椅子を選んでください。`);
       return;
     }
     if (seatType === "counter") {
@@ -914,7 +937,7 @@ function BookingForm({ initial, eventBookings, onSave, onCancel }) {
             )}
           </div>
         )}
-        <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "0.6rem" }}>
+        <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: "0.6rem" }}>
           {options.map((o) => {
             const def = SEAT_TYPES[o.key];
             const full = o.remaining <= 0 && seatType !== o.key;
@@ -1116,18 +1139,17 @@ function BookingList({ event, bookings, onAdd, onUpdate, onDelete }) {
             <div style={{ marginTop: "0.5rem", display: "flex", gap: "0.5rem", flexWrap: "wrap", alignItems: "center" }}>
               {seatTypeOf(b) === "undecided" ? (
                 (() => {
-                  const a = undecidedAssignments.get(b.id);
-                  if (a && a.autoStool) {
-                    return <Badge tone="muted">丸椅子(自動・満席のため)</Badge>;
-                  }
-                  if (a && a.seats.length > 0) {
-                    return (
-                      <Badge tone="gold">
-                        カウンター {a.seats.map((n) => CIRCLED_NUMBERS[n - 1]).join("")}(指定無し)
-                      </Badge>
-                    );
-                  }
-                  return <Badge tone="muted">未指定</Badge>;
+                  const a = undecidedAssignments.get(b.id) || { seats: [], overflow: b.count || 0 };
+                  return (
+                    <>
+                      {a.seats.length > 0 && (
+                        <Badge tone="gold">
+                          カウンター {a.seats.map((n) => CIRCLED_NUMBERS[n - 1]).join("")}(指定無し)
+                        </Badge>
+                      )}
+                      {a.overflow > 0 && <Badge tone="muted">丸椅子({a.overflow}名)</Badge>}
+                    </>
+                  );
                 })()
               ) : (
                 <Badge tone={b.seatType === "vip" || b.seatType === "counter" ? "gold" : "muted"}>
