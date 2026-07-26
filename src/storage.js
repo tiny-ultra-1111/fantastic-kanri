@@ -19,6 +19,7 @@ if (!supabaseUrl || !supabaseAnonKey) {
     "Supabaseの環境変数(VITE_SUPABASE_URL / VITE_SUPABASE_ANON_KEY)が設定されていません。.envファイルまたはCloudflare Pagesの環境変数を確認してください。"
   );
 }
+console.log("[storage.js] URL設定あり:", !!supabaseUrl, "/ キー設定あり:", !!supabaseAnonKey);
 
 const supabase = createClient(supabaseUrl, supabaseAnonKey);
 
