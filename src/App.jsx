@@ -21,6 +21,7 @@ const COLORS = {
   surface: "#183524",
   surface2: "#1F402C",
   gold: "#C6473A",
+  vip: "#E8B23D",
   cream: "#F5F1E6",
   muted: "#9FB8A8",
   danger: "#E2574A",
@@ -493,6 +494,7 @@ function TicketCard({ left, right, children }) {
 function Badge({ children, tone = "gold" }) {
   const map = {
     gold: { color: COLORS.gold, border: COLORS.gold },
+    vip: { color: COLORS.vip, border: COLORS.vip },
     muted: { color: COLORS.muted, border: COLORS.line },
   };
   return (
@@ -519,7 +521,7 @@ function SeatSummary({ bookingsForEvent }) {
   const totals = seatTypeTotals(bookingsForEvent);
   return (
     <div style={{ display: "flex", gap: "0.35rem", flexWrap: "wrap" }}>
-      <Badge tone="gold">VIP {totals.vip}名</Badge>
+      <Badge tone="vip">VIP {totals.vip}名</Badge>
       <Badge tone="gold">カウンター {totals.counterOccupancy}名</Badge>
       {totals.stool > 0 && <Badge tone="muted">丸椅子 {totals.stool}名</Badge>}
     </div>
@@ -684,7 +686,7 @@ function AdminLogin({ adminPin, onRecover, onSuccess, onBack }) {
         <TopBar title="PINの復旧" onBack={() => setRecovering(false)} />
         <Panel>
           <div style={{ color: COLORS.muted, fontSize: "0.82rem", marginBottom: "0.9rem", fontFamily: "'Zen Maru Gothic'", lineHeight: 1.6 }}>
-            復旧コードを入力すると、管理者PINが初期値(1234)にリセットされてログインできます。ログイン後、設定タブから新しいPINにすぐ変更してください。
+            復旧コードを入力すると、管理者PINが初期値(0234)にリセットされてログインできます。ログイン後、設定タブから新しいPINにすぐ変更してください。
           </div>
           <Field label="復旧コード">
             <input
@@ -761,9 +763,9 @@ function ParticipantLogin({ participants, onSuccess, onBack }) {
       <div style={{ padding: "1.5rem 1.2rem", maxWidth: "420px", margin: "0 auto" }}>
         <TopBar title="出演者ログイン" onBack={onBack} />
         <div style={{ color: COLORS.cream, fontFamily: "'Zen Maru Gothic'", fontSize: "0.8rem", lineHeight: 1.7, marginBottom: "1rem" }}>
-          お名前をご選択いただきログインしてください。初期パスワードは0000です。
+          お名前を選んでログインしてください
           <br />
-          ※お名前が見当たらない場合はタイニーまでご連絡ください
+          初期パスワードは0000です。
         </div>
         <Panel>
           <Field label="名前で検索">
@@ -806,8 +808,10 @@ function ParticipantLogin({ participants, onSuccess, onBack }) {
             ))}
           </div>
         </Panel>
-        <div style={{ color: COLORS.muted, fontFamily: "'Zen Maru Gothic'", fontSize: "0.75rem", marginTop: "0.9rem" }}>
-          その他操作方法のご要望・ご質問はタイニーまで
+        <div style={{ color: COLORS.muted, fontFamily: "'Zen Maru Gothic'", fontSize: "0.75rem", marginTop: "0.9rem", lineHeight: 1.7 }}>
+          ※お名前が見当たらない場合はリタまたはタイニーまでご連絡ください
+          <br />
+          ※その他操作方法のご要望・ご質問はタイニーまで
         </div>
       </div>
     );
@@ -953,9 +957,9 @@ function BookingForm({ initial, eventBookings, onSave, onCancel }) {
                 }}
                 style={{
                   position: "relative",
-                  background: seatType === o.key ? COLORS.gold : "transparent",
+                  background: seatType === o.key ? (o.key === "vip" ? COLORS.vip : COLORS.gold) : "transparent",
                   color: COLORS.cream,
-                  border: `1px solid ${seatType === o.key ? COLORS.gold : COLORS.line}`,
+                  border: `1px solid ${seatType === o.key ? (o.key === "vip" ? COLORS.vip : COLORS.gold) : COLORS.line}`,
                   borderRadius: "8px",
                   padding: "0.55rem 0.5rem",
                   fontFamily: "'Zen Maru Gothic'",
@@ -1073,7 +1077,7 @@ function BookingForm({ initial, eventBookings, onSave, onCancel }) {
   );
 }
 
-function BookingList({ event, bookings, onAdd, onUpdate, onDelete }) {
+function BookingList({ event, bookings, onAdd, onUpdate, onDelete, actorName = "管理者" }) {
   const [adding, setAdding] = useState(false);
   const [editingId, setEditingId] = useState(null);
   const [deleteTargetId, setDeleteTargetId] = useState(null);
@@ -1097,7 +1101,7 @@ function BookingList({ event, bookings, onAdd, onUpdate, onDelete }) {
             eventBookings={rawList}
             onCancel={() => setAdding(false)}
             onSave={(data) => {
-              onAdd({ id: uid(), eventId: event.id, ...data, createdAt: Date.now() });
+              onAdd({ id: uid(), eventId: event.id, ...data, createdAt: Date.now(), createdBy: actorName });
               setAdding(false);
             }}
           />
@@ -1152,7 +1156,7 @@ function BookingList({ event, bookings, onAdd, onUpdate, onDelete }) {
                   );
                 })()
               ) : (
-                <Badge tone={b.seatType === "vip" || b.seatType === "counter" ? "gold" : "muted"}>
+                <Badge tone={b.seatType === "vip" ? "vip" : b.seatType === "counter" ? "gold" : "muted"}>
                   {SEAT_TYPES[seatTypeOf(b)].label}
                   {seatTypeOf(b) === "counter" && b.counterSeats && b.counterSeats.length > 0 &&
                     ` ${b.counterSeats.map((n) => CIRCLED_NUMBERS[n - 1]).join("")}`}
@@ -1287,7 +1291,7 @@ function ParticipantDashboard({ participant, participants, onUpdateParticipants,
             担当の日程がまだ割り振られていません。管理者にご確認ください。
           </div>
         ) : (
-          <AllBookingsTab events={myEvents} participants={participants} bookings={bookings} onUpdateBookings={onUpdateBookings} />
+          <AllBookingsTab events={myEvents} participants={participants} bookings={bookings} onUpdateBookings={onUpdateBookings} actorName={participant.name} />
         )
       )}
       {tab === "settings" && (
@@ -1626,12 +1630,13 @@ function EventsTab({ events, participants, bookings, onUpdateEvents, onUpdateBoo
         )}
 
         <div style={{ display: "flex", flexWrap: "wrap", gap: "0.35rem", alignItems: "center", marginBottom: "1rem" }}>
-          {assignedNames.length === 0 && (
+          {assignedNames.length === 0 ? (
             <span style={{ color: COLORS.muted, fontFamily: "'Zen Maru Gothic'", fontSize: "0.8rem" }}>担当者は未設定です</span>
+          ) : (
+            <span style={{ color: COLORS.cream, fontFamily: "'Zen Maru Gothic'", fontSize: "0.85rem" }}>
+              {assignedNames.map((p) => p.name).join(" / ")}
+            </span>
           )}
-          {assignedNames.map((p) => (
-            <Badge key={p.id} tone={p.type === "guest" ? "muted" : "gold"}>{p.name}</Badge>
-          ))}
           <button onClick={() => setAssignEventId(viewingEvent.id)} style={iconBtnStyle}>担当者を編集</button>
         </div>
         <BookingList event={viewingEvent} bookings={bookings} onAdd={addBooking} onUpdate={updateBooking} onDelete={deleteBooking} />
@@ -1686,9 +1691,12 @@ function EventsTab({ events, participants, bookings, onUpdateEvents, onUpdateBoo
         </div>
       )}
 
-      <Field label="日程で検索(全月から検索します)">
-        <input style={inputStyle} placeholder="例:8/10 や バースデー" value={searchQuery} onChange={(e) => setSearchQuery(e.target.value)} />
-      </Field>
+      <input
+        style={{ ...inputStyle, marginTop: "0.9rem", marginBottom: "1rem" }}
+        placeholder="検索:日程、イベント名"
+        value={searchQuery}
+        onChange={(e) => setSearchQuery(e.target.value)}
+      />
 
       {!searching && monthKeys.length > 0 && (
         <Field label="表示する月">
@@ -1739,12 +1747,13 @@ function EventsTab({ events, participants, bookings, onUpdateEvents, onUpdateBoo
                 }
               >
                 <div style={{ marginTop: "0.7rem", display: "flex", flexWrap: "wrap", gap: "0.35rem", alignItems: "center" }}>
-                  {assignedNames.length === 0 && (
+                  {assignedNames.length === 0 ? (
                     <span style={{ color: COLORS.muted, fontFamily: "'Zen Maru Gothic'", fontSize: "0.8rem" }}>担当者は未設定です</span>
+                  ) : (
+                    <span style={{ color: COLORS.cream, fontFamily: "'Zen Maru Gothic'", fontSize: "0.85rem" }}>
+                      {assignedNames.map((p) => p.name).join(" / ")}
+                    </span>
                   )}
-                  {assignedNames.map((p) => (
-                    <Badge key={p.id} tone={p.type === "guest" ? "muted" : "gold"}>{p.name}</Badge>
-                  ))}
                 </div>
                 <button
                   onClick={(ev) => {
@@ -1803,6 +1812,9 @@ function ParticipantForm({ initial, participants, onSave, onCancel }) {
       <Field label="名前">
         <input style={inputStyle} value={name} onChange={(e) => setName(e.target.value)} autoFocus />
       </Field>
+      <div style={{ color: COLORS.muted, fontFamily: "'Zen Maru Gothic'", fontSize: "0.75rem", marginTop: "-0.5rem", marginBottom: "0.8rem", lineHeight: 1.5 }}>
+        ひらがなorカタカナ表記に統一した方が検索に引っかかりやすいです
+      </div>
       {isDuplicateName && (
         <div style={{ color: COLORS.danger, fontSize: "0.8rem", marginTop: "-0.5rem", marginBottom: "0.8rem" }}>
           同じ名前のユーザーが存在します
@@ -1865,9 +1877,12 @@ function RosterTab({ participants, onUpdateParticipants }) {
         </div>
       )}
 
-      <Field label="名前で検索">
-        <input style={inputStyle} placeholder="例:山田" value={searchQuery} onChange={(e) => setSearchQuery(e.target.value)} />
-      </Field>
+      <input
+        style={{ ...inputStyle, marginTop: "0.9rem", marginBottom: "1rem" }}
+        placeholder="検索:名前"
+        value={searchQuery}
+        onChange={(e) => setSearchQuery(e.target.value)}
+      />
 
       <div style={{ display: "flex", gap: "0.4rem", marginBottom: "1rem" }}>
         {[
@@ -1938,9 +1953,8 @@ function RosterTab({ participants, onUpdateParticipants }) {
   );
 }
 
-function AllBookingsTab({ events, participants, bookings, onUpdateBookings }) {
-  const [dateQuery, setDateQuery] = useState("");
-  const [nameQuery, setNameQuery] = useState("");
+function AllBookingsTab({ events, participants, bookings, onUpdateBookings, actorName = "管理者" }) {
+  const [query, setQuery] = useState("");
   const [viewingId, setViewingId] = useState(null);
 
   const addBooking = (b) => onUpdateBookings([...bookings, b]);
@@ -1962,45 +1976,82 @@ function AllBookingsTab({ events, participants, bookings, onUpdateBookings }) {
         {viewingEvent.note && (
           <div style={{ marginBottom: "0.8rem", fontFamily: "'Zen Maru Gothic'", fontWeight: 600, color: COLORS.gold }}>{viewingEvent.note}</div>
         )}
-        <BookingList event={viewingEvent} bookings={bookings} onAdd={addBooking} onUpdate={updateBooking} onDelete={deleteBooking} />
+        <BookingList event={viewingEvent} bookings={bookings} onAdd={addBooking} onUpdate={updateBooking} onDelete={deleteBooking} actorName={actorName} />
       </div>
     );
   }
 
-  // 予約者名でのフリー検索(全日程横断)
-  if (nameQuery.trim()) {
-    const matches = bookings.filter((b) => matchesQuery(b.name, nameQuery));
+  const searching = !!query.trim();
+
+  // 検索中は「日程(日付・備考)」と「予約者名」の両方をまとめて探し、それぞれ結果を表示する
+  if (searching) {
+    const matchingEvents = sorted.filter(
+      (e) => e.date.includes(query.trim()) || matchesQuery(formatDate(e.date), query) || matchesQuery(e.note, query)
+    );
+    const matchingBookings = bookings.filter((b) => matchesQuery(b.name, query));
+    const noResults = matchingEvents.length === 0 && matchingBookings.length === 0;
+
     return (
       <div>
-        <Field label="予約者名で検索(全日程から)">
-          <input style={inputStyle} value={nameQuery} onChange={(e) => setNameQuery(e.target.value)} autoFocus />
-        </Field>
-        {matches.length === 0 && <div style={{ color: COLORS.muted, fontFamily: "'Zen Maru Gothic'", fontSize: "0.9rem" }}>該当する予約が見つかりません。</div>}
-        {matches.map((b) => {
-          const ev = events.find((e) => e.id === b.eventId);
-          return (
-            <TicketCard
-              key={b.id}
-              left={
-                <div>
-                  <div style={{ fontFamily: "'Zen Maru Gothic'", fontWeight: 600, color: COLORS.cream }}>{b.name} <span style={{ color: COLORS.muted }}>({b.count}名)</span></div>
-                  {ev && <div style={{ fontFamily: "'Zen Maru Gothic'", color: COLORS.gold, fontSize: "0.8rem", marginTop: "0.2rem" }}>{formatDate(ev.date)}{ev.note ? ` ・ ${ev.note}` : ""}</div>}
+        <input
+          style={{ ...inputStyle, marginTop: "0.9rem", marginBottom: "1rem" }}
+          placeholder="検索:日程、予約名、イベント名"
+          value={query}
+          onChange={(e) => setQuery(e.target.value)}
+          autoFocus
+        />
+
+        {noResults && <div style={{ color: COLORS.muted, fontFamily: "'Zen Maru Gothic'", fontSize: "0.9rem" }}>該当するものが見つかりません。</div>}
+
+        {matchingEvents.length > 0 && (
+          <div style={{ marginBottom: "1.2rem" }}>
+            <div style={{ color: COLORS.muted, fontFamily: "'Zen Maru Gothic'", fontSize: "0.75rem", marginBottom: "0.5rem" }}>日程</div>
+            {matchingEvents.map((e) => {
+              const list = bookings.filter((b) => b.eventId === e.id);
+              return (
+                <div key={e.id} onClick={() => setViewingId(e.id)} style={{ cursor: "pointer" }}>
+                  <TicketCard
+                    left={
+                      <div>
+                        <div style={{ fontFamily: "'Zen Maru Gothic'", color: COLORS.gold, fontSize: "0.85rem" }}>{formatDate(e.date)}</div>
+                        {e.note && <div style={{ fontFamily: "'Zen Maru Gothic'", fontWeight: 600, color: COLORS.gold }}>{e.note}</div>}
+                      </div>
+                    }
+                    right={<SeatSummary bookingsForEvent={list} />}
+                  />
                 </div>
-              }
-              right={
-                ev && <button onClick={() => { setViewingId(ev.id); setNameQuery(""); }} style={iconBtnStyle}>この日程を開く</button>
-              }
-            />
-          );
-        })}
+              );
+            })}
+          </div>
+        )}
+
+        {matchingBookings.length > 0 && (
+          <div>
+            <div style={{ color: COLORS.muted, fontFamily: "'Zen Maru Gothic'", fontSize: "0.75rem", marginBottom: "0.5rem" }}>予約者</div>
+            {matchingBookings.map((b) => {
+              const ev = events.find((e) => e.id === b.eventId);
+              return (
+                <TicketCard
+                  key={b.id}
+                  left={
+                    <div>
+                      <div style={{ fontFamily: "'Zen Maru Gothic'", fontWeight: 600, color: COLORS.cream }}>{b.name} <span style={{ color: COLORS.muted }}>({b.count}名)</span></div>
+                      {ev && <div style={{ fontFamily: "'Zen Maru Gothic'", color: COLORS.gold, fontSize: "0.8rem", marginTop: "0.2rem" }}>{formatDate(ev.date)}{ev.note ? ` ・ ${ev.note}` : ""}</div>}
+                    </div>
+                  }
+                  right={
+                    ev && <button onClick={() => { setViewingId(ev.id); setQuery(""); }} style={iconBtnStyle}>この日程を開く</button>
+                  }
+                />
+              );
+            })}
+          </div>
+        )}
       </div>
     );
   }
 
-  const dateSearching = !!dateQuery.trim();
-  const visibleEvents = dateSearching
-    ? sorted.filter((e) => e.date.includes(dateQuery.trim()) || matchesQuery(formatDate(e.date), dateQuery) || matchesQuery(e.note, dateQuery))
-    : sorted.filter((e) => monthKeyOf(e.date) === selectedMonth);
+  const visibleEvents = sorted.filter((e) => monthKeyOf(e.date) === selectedMonth);
 
   return (
     <div>
@@ -2019,14 +2070,14 @@ function AllBookingsTab({ events, participants, bookings, onUpdateBookings }) {
         ⚠ VIPとカウンターなど座席種類が違うものに関して、まとめて入力ができません。2回に分けてご入力ください。
       </div>
 
-      <Field label="予約者名で検索(全日程から)">
-        <input style={inputStyle} placeholder="例:山田" value={nameQuery} onChange={(e) => setNameQuery(e.target.value)} />
-      </Field>
-      <Field label="日程で絞り込み(全月から検索します)">
-        <input style={inputStyle} placeholder="例:8/10 や バースデー" value={dateQuery} onChange={(e) => setDateQuery(e.target.value)} />
-      </Field>
+      <input
+        style={{ ...inputStyle, marginBottom: "1rem" }}
+        placeholder="検索:日程、予約名、イベント名"
+        value={query}
+        onChange={(e) => setQuery(e.target.value)}
+      />
 
-      {!dateSearching && monthKeys.length > 0 && (
+      {monthKeys.length > 0 && (
         <Field label="表示する月">
           <select style={inputStyle} value={selectedMonth} onChange={(e) => setSelectedMonth(e.target.value)}>
             {monthKeys.map((k) => (
@@ -2055,13 +2106,37 @@ function AllBookingsTab({ events, participants, bookings, onUpdateBookings }) {
               right={<SeatSummary bookingsForEvent={list} />}
             >
               {assignedNames.length > 0 && (
-                <div style={{ marginTop: "0.6rem", display: "flex", flexWrap: "wrap", gap: "0.35rem" }}>
-                  {assignedNames.map((p) => (
-                    <Badge key={p.id} tone={p.type === "guest" ? "muted" : "gold"}>{p.name}</Badge>
-                  ))}
+                <div style={{ marginTop: "0.6rem" }}>
+                  <span style={{ color: COLORS.cream, fontFamily: "'Zen Maru Gothic'", fontSize: "0.85rem" }}>
+                    {assignedNames.map((p) => p.name).join(" / ")}
+                  </span>
                 </div>
               )}
             </TicketCard>
+          </div>
+        );
+      })}
+    </div>
+  );
+}
+
+/* 全日程を横断して、予約が入力された順(新しい順)に一覧できるログ。
+   「誰が入力したか(スタッフ名)」と「誰の予約か(お客様名)」の両方が分かるようにしている。 */
+function BookingLogTab({ events, bookings }) {
+  const sorted = [...bookings].sort((a, b) => (b.createdAt || 0) - (a.createdAt || 0)).slice(0, 30);
+
+  return (
+    <div style={{ display: "flex", flexDirection: "column", gap: "0.6rem" }}>
+      {sorted.length === 0 && (
+        <div style={{ color: COLORS.muted, fontFamily: "'Zen Maru Gothic'", fontSize: "0.9rem" }}>まだ予約の記録がありません。</div>
+      )}
+      {sorted.map((b) => {
+        const ev = events.find((e) => e.id === b.eventId);
+        const [, m, d] = ev ? ev.date.split("-") : [];
+        const dateLabel = ev ? `${parseInt(m, 10)}/${parseInt(d, 10)}` : "";
+        return (
+          <div key={b.id} style={{ color: COLORS.cream, fontFamily: "'Zen Maru Gothic'", fontSize: "0.85rem" }}>
+            {dateLabel} {b.name}({b.count}名様) 入力者:{b.createdBy || "不明"}
           </div>
         );
       })}
@@ -2095,9 +2170,10 @@ function SettingsTab({ adminPin, onUpdateAdminPin }) {
 function AdminDashboard({ store, onLogout }) {
   const [tab, setTab] = useState("events");
   const tabs = [
+    { key: "log", label: "入力ログ" },
+    { key: "bookings", label: "予約管理" },
     { key: "events", label: "日程管理" },
     { key: "roster", label: "出演者名簿" },
-    { key: "bookings", label: "予約管理" },
     { key: "settings", label: "設定" },
   ];
   return (
@@ -2139,6 +2215,7 @@ function AdminDashboard({ store, onLogout }) {
         <AllBookingsTab events={store.events} participants={store.participants} bookings={store.bookings} onUpdateBookings={store.updateBookings} />
       )}
       {tab === "settings" && <SettingsTab adminPin={store.adminPin} onUpdateAdminPin={store.updateAdminPin} />}
+      {tab === "log" && <BookingLogTab events={store.events} bookings={store.bookings} />}
     </div>
   );
 }
@@ -2175,7 +2252,7 @@ export default function App() {
         <AdminLogin
           adminPin={store.adminPin}
           onBack={goLanding}
-          onRecover={() => store.updateAdminPin("1234")}
+          onRecover={() => store.updateAdminPin("0234")}
           onSuccess={() => setScreen("admin")}
         />
       )}
