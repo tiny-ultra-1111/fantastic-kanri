@@ -120,6 +120,87 @@ function canFitConsecutive(used, start, count) {
   return true;
 }
 
+/* ==== 検索: ひらがな・カタカナ・ローマ字を横断してヒットさせるためのヘルパー ====
+   ・カタカナは内部でひらがなに変換して比較するので、ひらがな/カタカナはどちらで打っても一致する
+   ・ローマ字は「ひらがな登録の名前」に対してのみ対応(漢字の読みまでは判定できないため) */
+function katakanaToHiragana(str) {
+  return str.replace(/[\u30a1-\u30f6]/g, (ch) => String.fromCharCode(ch.charCodeAt(0) - 0x60));
+}
+
+const ROMAJI_MAP = {
+  "きゃ": "kya", "きゅ": "kyu", "きょ": "kyo",
+  "しゃ": "sha", "しゅ": "shu", "しょ": "sho",
+  "ちゃ": "cha", "ちゅ": "chu", "ちょ": "cho",
+  "にゃ": "nya", "にゅ": "nyu", "にょ": "nyo",
+  "ひゃ": "hya", "ひゅ": "hyu", "ひょ": "hyo",
+  "みゃ": "mya", "みゅ": "myu", "みょ": "myo",
+  "りゃ": "rya", "りゅ": "ryu", "りょ": "ryo",
+  "ぎゃ": "gya", "ぎゅ": "gyu", "ぎょ": "gyo",
+  "じゃ": "ja", "じゅ": "ju", "じょ": "jo",
+  "びゃ": "bya", "びゅ": "byu", "びょ": "byo",
+  "ぴゃ": "pya", "ぴゅ": "pyu", "ぴょ": "pyo",
+  "あ": "a", "い": "i", "う": "u", "え": "e", "お": "o",
+  "か": "ka", "き": "ki", "く": "ku", "け": "ke", "こ": "ko",
+  "さ": "sa", "し": "shi", "す": "su", "せ": "se", "そ": "so",
+  "た": "ta", "ち": "chi", "つ": "tsu", "て": "te", "と": "to",
+  "な": "na", "に": "ni", "ぬ": "nu", "ね": "ne", "の": "no",
+  "は": "ha", "ひ": "hi", "ふ": "fu", "へ": "he", "ほ": "ho",
+  "ま": "ma", "み": "mi", "む": "mu", "め": "me", "も": "mo",
+  "や": "ya", "ゆ": "yu", "よ": "yo",
+  "ら": "ra", "り": "ri", "る": "ru", "れ": "re", "ろ": "ro",
+  "わ": "wa", "ゐ": "wi", "ゑ": "we", "を": "wo", "ん": "n",
+  "が": "ga", "ぎ": "gi", "ぐ": "gu", "げ": "ge", "ご": "go",
+  "ざ": "za", "じ": "ji", "ず": "zu", "ぜ": "ze", "ぞ": "zo",
+  "だ": "da", "ぢ": "ji", "づ": "zu", "で": "de", "ど": "do",
+  "ば": "ba", "び": "bi", "ぶ": "bu", "べ": "be", "ぼ": "bo",
+  "ぱ": "pa", "ぴ": "pi", "ぷ": "pu", "ぺ": "pe", "ぽ": "po",
+};
+
+function hiraganaToRomaji(str) {
+  let result = "";
+  let i = 0;
+  while (i < str.length) {
+    const ch = str[i];
+    if (ch === "っ" && i + 1 < str.length) {
+      const nextRomaji = ROMAJI_MAP[str.slice(i + 1, i + 3)] || ROMAJI_MAP[str[i + 1]];
+      if (nextRomaji) {
+        result += nextRomaji[0];
+        i += 1;
+        continue;
+      }
+    }
+    const two = str.slice(i, i + 2);
+    if (ROMAJI_MAP[two]) {
+      result += ROMAJI_MAP[two];
+      i += 2;
+      continue;
+    }
+    if (ROMAJI_MAP[ch]) {
+      result += ROMAJI_MAP[ch];
+      i += 1;
+      continue;
+    }
+    result += ch;
+    i += 1;
+  }
+  return result;
+}
+
+/* text(登録されている文字列)がrawQuery(入力された検索語)にヒットするか判定する。
+   ひらがな/カタカナ/(かな登録の名前に対する)ローマ字での検索に対応。 */
+function matchesQuery(text, rawQuery) {
+  if (!rawQuery || !rawQuery.trim()) return true;
+  if (!text) return false;
+  const query = rawQuery.trim().toLowerCase();
+  if (text.toLowerCase().includes(query)) return true;
+  const textHira = katakanaToHiragana(text).toLowerCase();
+  const queryHira = katakanaToHiragana(rawQuery.trim()).toLowerCase();
+  if (textHira.includes(queryHira)) return true;
+  const textRomaji = hiraganaToRomaji(textHira);
+  if (textRomaji.includes(query)) return true;
+  return false;
+}
+
 function useStorage() {
   const [participants, setParticipants] = useState([]);
   const [events, setEvents] = useState([]);
@@ -506,17 +587,16 @@ function Landing({ onSelectRole }) {
       }}
     >
       <div style={{ marginBottom: "2.2rem" }}>
-        <div style={{ color: COLORS.muted, fontFamily: "'Zen Maru Gothic'", fontSize: "0.8rem", letterSpacing: "0.15em", marginBottom: "0.4rem" }}>
+        <div style={{ color: COLORS.cream, fontFamily: "'Zen Maru Gothic'", fontSize: "0.8rem", letterSpacing: "0.15em", marginBottom: "0.4rem" }}>
           FANTASTIC CABARET
         </div>
-        <Marquee size="2.6rem">Fantastic Cabaret 予約管理</Marquee>
       </div>
       <div style={{ display: "flex", flexDirection: "column", gap: "0.9rem", width: "100%", maxWidth: "320px" }}>
-        <Button full onClick={() => onSelectRole("admin")}>
-          管理者としてログイン
-        </Button>
-        <Button full variant="ghost" onClick={() => onSelectRole("participant")}>
+        <Button full onClick={() => onSelectRole("participant")}>
           出演者としてログイン
+        </Button>
+        <Button full variant="ghost" onClick={() => onSelectRole("admin")}>
+          管理者としてログイン
         </Button>
       </div>
     </div>
@@ -583,7 +663,6 @@ function AdminLogin({ adminPin, onRecover, onSuccess, onBack }) {
               setErr("");
             }}
             onKeyDown={(e) => e.key === "Enter" && submit()}
-            type="password"
             inputMode="numeric"
             autoFocus
           />
@@ -624,11 +703,16 @@ function ParticipantLogin({ participants, onSuccess, onBack }) {
 
   if (!selectedId) {
     const matches = query.trim()
-      ? participants.filter((p) => p.name.toLowerCase().includes(query.trim().toLowerCase()))
+      ? participants.filter((p) => matchesQuery(p.name, query))
       : participants;
     return (
       <div style={{ padding: "1.5rem 1.2rem", maxWidth: "420px", margin: "0 auto" }}>
         <TopBar title="出演者ログイン" onBack={onBack} />
+        <div style={{ color: COLORS.cream, fontFamily: "'Zen Maru Gothic'", fontSize: "0.8rem", lineHeight: 1.7, marginBottom: "1rem" }}>
+          お名前をご選択いただきログインしてください。初期パスワードは0000です。
+          <br />
+          ※お名前が見当たらない場合はタイニーまでご連絡ください
+        </div>
         <Panel>
           <Field label="名前で検索">
             <input
@@ -670,6 +754,9 @@ function ParticipantLogin({ participants, onSuccess, onBack }) {
             ))}
           </div>
         </Panel>
+        <div style={{ color: COLORS.muted, fontFamily: "'Zen Maru Gothic'", fontSize: "0.75rem", marginTop: "0.9rem" }}>
+          その他操作方法のご要望・ご質問はタイニーまで
+        </div>
       </div>
     );
   }
@@ -692,7 +779,6 @@ function ParticipantLogin({ participants, onSuccess, onBack }) {
               setErr("");
             }}
             onKeyDown={(e) => e.key === "Enter" && submit()}
-            type="password"
             inputMode="numeric"
             autoFocus
           />
@@ -718,6 +804,8 @@ function BookingForm({ initial, eventBookings, onSave, onCancel }) {
   );
   const [notes, setNotes] = useState(initial?.notes || "");
   const [error, setError] = useState("");
+  const [showChart, setShowChart] = useState(false);
+  const [chartMissing, setChartMissing] = useState(false);
 
   const list = eventBookings || [];
   const remainingVip = remainingCapacity(list, "vip", initial?.id);
@@ -779,6 +867,29 @@ function BookingForm({ initial, eventBookings, onSave, onCancel }) {
         />
       </Field>
       <Field label="予約種別">
+        <button
+          type="button"
+          onClick={() => setShowChart(!showChart)}
+          style={{ ...iconBtnStyle, marginBottom: "0.6rem" }}
+        >
+          {showChart ? "座席表を隠す" : "座席表を見る"}
+        </button>
+        {showChart && (
+          <div style={{ marginBottom: "0.8rem" }}>
+            {chartMissing ? (
+              <div style={{ color: COLORS.muted, fontFamily: "'Zen Maru Gothic'", fontSize: "0.8rem" }}>
+                座席表の画像がまだ設定されていません。
+              </div>
+            ) : (
+              <img
+                src="/zaseki.JPG"
+                alt="座席表"
+                onError={() => setChartMissing(true)}
+                style={{ width: "100%", borderRadius: "8px", border: `1px solid ${COLORS.line}` }}
+              />
+            )}
+          </div>
+        )}
         <div style={{ color: COLORS.muted, fontFamily: "'Zen Maru Gothic'", fontSize: "0.75rem", marginBottom: "0.5rem", lineHeight: 1.5 }}>
           「未指定」はカウンター指定席と同じ8席の枠を共有します(自動的にカウンター席として扱われます)。枠が埋まると「丸椅子」を選んでください。
         </div>
@@ -918,66 +1029,6 @@ function BookingForm({ initial, eventBookings, onSave, onCancel }) {
   );
 }
 
-/* 座席配置の簡易マップ。VIP・カウンター(番号付き)・丸椅子の埋まり具合を視覚化する。
-   「未指定」の人はカウンター枠を共有するが具体的な番号は持たないため、
-   空いている番号の席に薄い色で仮に割り当てて表示する(実際の座席番号を保証するものではない)。 */
-function SeatMap({ bookingsForEvent }) {
-  const totals = seatTypeTotals(bookingsForEvent);
-  const reservedSeats = usedCounterSeats(bookingsForEvent);
-  const emptyNumbers = [1, 2, 3, 4, 5, 6, 7, 8].filter((n) => !reservedSeats.has(n));
-  const genericFillCount = Math.max(totals.counterOccupancy - reservedSeats.size, 0);
-  const genericFilled = new Set(emptyNumbers.slice(0, genericFillCount));
-
-  const seatCircle = (key, label, filled, tone) => (
-    <div
-      key={key}
-      style={{
-        width: "30px",
-        height: "30px",
-        borderRadius: "50%",
-        display: "flex",
-        alignItems: "center",
-        justifyContent: "center",
-        fontFamily: "'Zen Maru Gothic'",
-        fontSize: "0.75rem",
-        fontWeight: 700,
-        flexShrink: 0,
-        background: filled ? tone : "transparent",
-        color: filled ? COLORS.cream : COLORS.muted,
-        border: `1px solid ${filled ? tone : COLORS.line}`,
-      }}
-    >
-      {label}
-    </div>
-  );
-
-  return (
-    <div style={{ background: COLORS.surface2, border: `1px solid ${COLORS.line}`, borderRadius: "10px", padding: "0.9rem", marginBottom: "1rem" }}>
-      <div style={{ marginBottom: "0.6rem" }}>
-        <div style={{ color: COLORS.muted, fontFamily: "'Zen Maru Gothic'", fontSize: "0.75rem", marginBottom: "0.35rem" }}>VIP(4席)</div>
-        <div style={{ display: "flex", gap: "0.4rem", flexWrap: "wrap" }}>
-          {[1, 2, 3, 4].map((i) => seatCircle(`vip-${i}`, "", i <= totals.vip, COLORS.gold))}
-        </div>
-      </div>
-      <div style={{ marginBottom: "0.6rem" }}>
-        <div style={{ color: COLORS.muted, fontFamily: "'Zen Maru Gothic'", fontSize: "0.75rem", marginBottom: "0.35rem" }}>
-          カウンター(8席・濃い色=指定席予約 / 薄い色=未指定の自動割当)
-        </div>
-        <div style={{ display: "flex", gap: "0.4rem", flexWrap: "wrap" }}>
-          {[1, 2, 3, 4, 5, 6, 7, 8].map((n) => {
-            if (reservedSeats.has(n)) return seatCircle(`c-${n}`, CIRCLED_NUMBERS[n - 1], true, COLORS.gold);
-            if (genericFilled.has(n)) return seatCircle(`c-${n}`, CIRCLED_NUMBERS[n - 1], true, COLORS.surface);
-            return seatCircle(`c-${n}`, CIRCLED_NUMBERS[n - 1], false, COLORS.line);
-          })}
-        </div>
-      </div>
-      {totals.stool > 0 && (
-        <div style={{ color: COLORS.muted, fontFamily: "'Zen Maru Gothic'", fontSize: "0.8rem" }}>丸椅子:{totals.stool}名(席数の上限なし)</div>
-      )}
-    </div>
-  );
-}
-
 function BookingList({ event, bookings, onAdd, onUpdate, onDelete }) {
   const [adding, setAdding] = useState(false);
   const [editingId, setEditingId] = useState(null);
@@ -988,7 +1039,6 @@ function BookingList({ event, bookings, onAdd, onUpdate, onDelete }) {
 
   return (
     <div>
-      <SeatMap bookingsForEvent={rawList} />
       <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "0.9rem", flexWrap: "wrap", gap: "0.5rem" }}>
         <SeatSummary bookingsForEvent={rawList} />
         {!adding && (
@@ -1121,7 +1171,7 @@ function ParticipantSettingsTab({ participant, participants, onUpdateParticipant
         {self.name} さんの個人PIN変更
       </div>
       <Field label="現在のPIN">
-        <input style={pinInputStyle} value={currentPin} onChange={(e) => { setCurrentPin(e.target.value); setError(""); }} inputMode="numeric" type="password" />
+        <input style={pinInputStyle} value={currentPin} onChange={(e) => { setCurrentPin(e.target.value); setError(""); }} inputMode="numeric" />
       </Field>
       <Field label="新しいPIN">
         <input style={pinInputStyle} value={newPin} onChange={(e) => { setNewPin(e.target.value); setError(""); }} inputMode="numeric" />
@@ -1197,7 +1247,7 @@ function AssignModal({ event, participants, onToggle, onClose }) {
 
   const filtered = participants.filter((p) => {
     if (filter !== "all" && p.type !== filter) return false;
-    if (query && !p.name.toLowerCase().includes(query.toLowerCase())) return false;
+    if (query && !matchesQuery(p.name, query)) return false;
     return true;
   });
 
@@ -1538,10 +1588,7 @@ function EventsTab({ events, participants, bookings, onUpdateEvents, onUpdateBoo
 
   const searching = !!searchQuery.trim();
   const visibleEvents = searching
-    ? sorted.filter((e) => {
-        const q = searchQuery.trim().toLowerCase();
-        return e.date.includes(q) || formatDate(e.date).toLowerCase().includes(q) || (e.note || "").toLowerCase().includes(q);
-      })
+    ? sorted.filter((e) => e.date.includes(searchQuery.trim()) || matchesQuery(formatDate(e.date), searchQuery) || matchesQuery(e.note, searchQuery))
     : sorted.filter((e) => monthKeyOf(e.date) === selectedMonth);
 
   return (
@@ -1676,78 +1723,84 @@ function EventsTab({ events, participants, bookings, onUpdateEvents, onUpdateBoo
   );
 }
 
+function ParticipantForm({ initial, participants, onSave, onCancel }) {
+  const [name, setName] = useState(initial?.name || "");
+  const [pin, setPin] = useState(initial?.pin || "0000");
+  const [type, setType] = useState(initial?.type || "regular");
+
+  const isDuplicateName = name.trim()
+    ? participants.some((p) => p.id !== initial?.id && p.name.trim() === name.trim())
+    : false;
+
+  const submit = () => {
+    if (!name.trim() || !pin.trim() || isDuplicateName) return;
+    onSave({ name: name.trim(), pin: pin.trim(), type });
+  };
+
+  return (
+    <Panel>
+      <Field label="名前">
+        <input style={inputStyle} value={name} onChange={(e) => setName(e.target.value)} autoFocus />
+      </Field>
+      {isDuplicateName && (
+        <div style={{ color: COLORS.danger, fontSize: "0.8rem", marginTop: "-0.5rem", marginBottom: "0.8rem" }}>
+          同じ名前のユーザーが存在します
+        </div>
+      )}
+      <Field label="個人PIN(4桁など)">
+        <input style={inputStyle} value={pin} onChange={(e) => setPin(e.target.value)} inputMode="numeric" />
+      </Field>
+      <Field label="区分">
+        <div style={{ display: "flex", gap: "0.6rem" }}>
+          <Button variant={type === "regular" ? "gold" : "ghost"} onClick={() => setType("regular")}>レギュラー</Button>
+          <Button variant={type === "guest" ? "gold" : "ghost"} onClick={() => setType("guest")}>ゲスト</Button>
+        </div>
+      </Field>
+      <div style={{ display: "flex", gap: "0.6rem" }}>
+        <Button onClick={submit} disabled={isDuplicateName}>{initial ? "更新する" : "追加する"}</Button>
+        <Button variant="ghost" onClick={onCancel}>キャンセル</Button>
+      </div>
+    </Panel>
+  );
+}
+
 function RosterTab({ participants, onUpdateParticipants }) {
   const [adding, setAdding] = useState(false);
   const [editingId, setEditingId] = useState(null);
-  const [name, setName] = useState("");
-  const [pin, setPin] = useState("");
-  const [type, setType] = useState("regular");
   const [searchQuery, setSearchQuery] = useState("");
+  const [typeFilter, setTypeFilter] = useState("all");
 
-  const resetForm = () => {
-    setName("");
-    setPin("");
-    setType("regular");
+  const addParticipant = (data) => {
+    onUpdateParticipants([...participants, { id: uid(), ...data }]);
     setAdding(false);
+  };
+
+  const updateParticipant = (id, data) => {
+    onUpdateParticipants(participants.map((p) => (p.id === id ? { ...p, ...data } : p)));
     setEditingId(null);
-  };
-
-  const isDuplicateName = name.trim()
-    ? participants.some((p) => p.id !== editingId && p.name.trim() === name.trim())
-    : false;
-
-  const save = () => {
-    if (!name.trim() || !pin.trim() || isDuplicateName) return;
-    if (editingId) {
-      onUpdateParticipants(
-        participants.map((p) => (p.id === editingId ? { ...p, name: name.trim(), pin: pin.trim(), type } : p))
-      );
-    } else {
-      onUpdateParticipants([...participants, { id: uid(), name: name.trim(), pin: pin.trim(), type }]);
-    }
-    resetForm();
-  };
-
-  const startEdit = (p) => {
-    setEditingId(p.id);
-    setName(p.name);
-    setPin(p.pin);
-    setType(p.type);
-    setAdding(true);
   };
 
   const remove = (id) => onUpdateParticipants(participants.filter((p) => p.id !== id));
 
-  const filtered = participants.filter((p) => p.name.toLowerCase().includes(searchQuery.trim().toLowerCase()));
+  const filtered = participants
+    .filter((p) => typeFilter === "all" || p.type === typeFilter)
+    .filter((p) => matchesQuery(p.name, searchQuery));
 
   return (
     <div>
-      {!adding && <Button onClick={() => setAdding(true)}>+ 出演者を追加</Button>}
+      {!adding && (
+        <Button
+          onClick={() => {
+            setEditingId(null);
+            setAdding(true);
+          }}
+        >
+          + 出演者を追加
+        </Button>
+      )}
       {adding && (
         <div style={{ margin: "0.9rem 0" }}>
-          <Panel>
-            <Field label="名前">
-              <input style={inputStyle} value={name} onChange={(e) => setName(e.target.value)} />
-            </Field>
-            {isDuplicateName && (
-              <div style={{ color: COLORS.danger, fontSize: "0.8rem", marginTop: "-0.5rem", marginBottom: "0.8rem" }}>
-                同じ名前のユーザーが存在します
-              </div>
-            )}
-            <Field label="個人PIN(4桁など)">
-              <input style={inputStyle} value={pin} onChange={(e) => setPin(e.target.value)} inputMode="numeric" />
-            </Field>
-            <Field label="区分">
-              <div style={{ display: "flex", gap: "0.6rem" }}>
-                <Button variant={type === "regular" ? "gold" : "ghost"} onClick={() => setType("regular")}>レギュラー</Button>
-                <Button variant={type === "guest" ? "gold" : "ghost"} onClick={() => setType("guest")}>ゲスト</Button>
-              </div>
-            </Field>
-            <div style={{ display: "flex", gap: "0.6rem" }}>
-              <Button onClick={save} disabled={isDuplicateName}>{editingId ? "更新する" : "追加する"}</Button>
-              <Button variant="ghost" onClick={resetForm}>キャンセル</Button>
-            </div>
-          </Panel>
+          <ParticipantForm participants={participants} onSave={addParticipant} onCancel={() => setAdding(false)} />
         </div>
       )}
 
@@ -1755,26 +1808,70 @@ function RosterTab({ participants, onUpdateParticipants }) {
         <input style={inputStyle} placeholder="例:山田" value={searchQuery} onChange={(e) => setSearchQuery(e.target.value)} />
       </Field>
 
+      <div style={{ display: "flex", gap: "0.4rem", marginBottom: "1rem" }}>
+        {[
+          { key: "all", label: "全て表示" },
+          { key: "regular", label: "レギュラー" },
+          { key: "guest", label: "ゲスト" },
+        ].map((f) => (
+          <button
+            key={f.key}
+            onClick={() => setTypeFilter(f.key)}
+            style={{
+              background: typeFilter === f.key ? COLORS.surface2 : "transparent",
+              color: typeFilter === f.key ? COLORS.cream : COLORS.muted,
+              border: `1px solid ${COLORS.line}`,
+              borderRadius: "999px",
+              padding: "0.35rem 0.85rem",
+              fontFamily: "'Zen Maru Gothic'",
+              fontSize: "0.8rem",
+              cursor: "pointer",
+            }}
+          >
+            {f.label}
+          </button>
+        ))}
+      </div>
+
       <div style={{ marginTop: "1rem" }}>
         {filtered.length === 0 && <div style={{ color: COLORS.muted, fontFamily: "'Zen Maru Gothic'", fontSize: "0.9rem" }}>該当する出演者がいません。</div>}
-        {filtered.map((p) => (
-          <TicketCard
-            key={p.id}
-            left={
-              <div>
-                <div style={{ fontFamily: "'Zen Maru Gothic'", fontWeight: 600, color: COLORS.cream }}>{p.name}</div>
-                <div style={{ fontFamily: "'Zen Maru Gothic'", color: COLORS.muted, fontSize: "0.8rem" }}>PIN: {p.pin}</div>
-              </div>
-            }
-            right={
-              <div style={{ display: "flex", gap: "0.4rem", alignItems: "center" }}>
-                <Badge tone={p.type === "guest" ? "muted" : "gold"}>{p.type === "guest" ? "ゲスト" : "レギュラー"}</Badge>
-                <button onClick={() => startEdit(p)} style={iconBtnStyle}>編集</button>
-                <button onClick={() => remove(p.id)} style={{ ...iconBtnStyle, color: COLORS.danger }}>削除</button>
-              </div>
-            }
-          />
-        ))}
+        {filtered.map((p) =>
+          editingId === p.id ? (
+            <div key={p.id} style={{ marginBottom: "0.9rem" }}>
+              <ParticipantForm
+                initial={p}
+                participants={participants}
+                onSave={(data) => updateParticipant(p.id, data)}
+                onCancel={() => setEditingId(null)}
+              />
+            </div>
+          ) : (
+            <TicketCard
+              key={p.id}
+              left={
+                <div>
+                  <div style={{ fontFamily: "'Zen Maru Gothic'", fontWeight: 600, color: COLORS.cream }}>{p.name}</div>
+                  <div style={{ fontFamily: "'Zen Maru Gothic'", color: COLORS.muted, fontSize: "0.8rem" }}>PIN: {p.pin}</div>
+                </div>
+              }
+              right={
+                <div style={{ display: "flex", gap: "0.4rem", alignItems: "center" }}>
+                  <Badge tone={p.type === "guest" ? "muted" : "gold"}>{p.type === "guest" ? "ゲスト" : "レギュラー"}</Badge>
+                  <button
+                    onClick={() => {
+                      setAdding(false);
+                      setEditingId(p.id);
+                    }}
+                    style={iconBtnStyle}
+                  >
+                    編集
+                  </button>
+                  <button onClick={() => remove(p.id)} style={{ ...iconBtnStyle, color: COLORS.danger }}>削除</button>
+                </div>
+              }
+            />
+          )
+        )}
       </div>
     </div>
   );
@@ -1790,6 +1887,8 @@ function AllBookingsTab({ events, participants, bookings, onUpdateBookings }) {
   const deleteBooking = (id) => onUpdateBookings(bookings.filter((x) => x.id !== id));
 
   const sorted = [...events].sort((a, b) => a.date.localeCompare(b.date));
+  const monthKeys = Array.from(new Set(sorted.map((e) => monthKeyOf(e.date)))).sort((a, b) => b.localeCompare(a));
+  const [selectedMonth, setSelectedMonth] = useState(() => monthKeys[0] || "");
   const viewingEvent = events.find((e) => e.id === viewingId);
 
   if (viewingEvent) {
@@ -1809,8 +1908,7 @@ function AllBookingsTab({ events, participants, bookings, onUpdateBookings }) {
 
   // 予約者名でのフリー検索(全日程横断)
   if (nameQuery.trim()) {
-    const q = nameQuery.trim().toLowerCase();
-    const matches = bookings.filter((b) => b.name.toLowerCase().includes(q));
+    const matches = bookings.filter((b) => matchesQuery(b.name, nameQuery));
     return (
       <div>
         <Field label="予約者名で検索(全日程から)">
@@ -1838,11 +1936,10 @@ function AllBookingsTab({ events, participants, bookings, onUpdateBookings }) {
     );
   }
 
-  const filtered = sorted.filter((e) => {
-    if (!dateQuery.trim()) return true;
-    const q = dateQuery.trim().toLowerCase();
-    return e.date.includes(q) || formatDate(e.date).toLowerCase().includes(q) || (e.note || "").toLowerCase().includes(q);
-  });
+  const dateSearching = !!dateQuery.trim();
+  const visibleEvents = dateSearching
+    ? sorted.filter((e) => e.date.includes(dateQuery.trim()) || matchesQuery(formatDate(e.date), dateQuery) || matchesQuery(e.note, dateQuery))
+    : sorted.filter((e) => monthKeyOf(e.date) === selectedMonth);
 
   return (
     <div>
@@ -1864,12 +1961,25 @@ function AllBookingsTab({ events, participants, bookings, onUpdateBookings }) {
       <Field label="予約者名で検索(全日程から)">
         <input style={inputStyle} placeholder="例:山田" value={nameQuery} onChange={(e) => setNameQuery(e.target.value)} />
       </Field>
-      <Field label="日程で絞り込み">
+      <Field label="日程で絞り込み(全月から検索します)">
         <input style={inputStyle} placeholder="例:8/10 や バースデー" value={dateQuery} onChange={(e) => setDateQuery(e.target.value)} />
       </Field>
 
-      {filtered.length === 0 && <div style={{ color: COLORS.muted, fontFamily: "'Zen Maru Gothic'", fontSize: "0.9rem" }}>該当する日程がありません。</div>}
-      {filtered.map((e) => {
+      {!dateSearching && monthKeys.length > 0 && (
+        <Field label="表示する月">
+          <select style={inputStyle} value={selectedMonth} onChange={(e) => setSelectedMonth(e.target.value)}>
+            {monthKeys.map((k) => (
+              <option key={k} value={k}>{monthLabelOf(k)}</option>
+            ))}
+          </select>
+        </Field>
+      )}
+
+      {sorted.length === 0 && <div style={{ color: COLORS.muted, fontFamily: "'Zen Maru Gothic'", fontSize: "0.9rem" }}>まだ日程がありません。</div>}
+      {sorted.length > 0 && visibleEvents.length === 0 && (
+        <div style={{ color: COLORS.muted, fontFamily: "'Zen Maru Gothic'", fontSize: "0.9rem" }}>該当する日程がありません。</div>
+      )}
+      {visibleEvents.map((e) => {
         const list = bookings.filter((b) => b.eventId === e.id);
         const assignedNames = (participants || []).filter((p) => (e.assigned || []).includes(p.id));
         return (
