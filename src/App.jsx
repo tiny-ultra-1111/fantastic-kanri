@@ -132,7 +132,8 @@ function useStorage() {
     try {
       const res = await window.storage.get(key, true);
       return res ? JSON.parse(res.value) : fallback;
-    } catch {
+    } catch (err) {
+      console.error(`[読み込みエラー] key="${key}":`, err);
       return fallback;
     }
   }, []);
@@ -151,6 +152,7 @@ function useStorage() {
         setBookings(b);
         setAdminPin(a.pin || "1234");
       } catch (e) {
+        console.error("[初期読み込みエラー]", e);
         setError("データの読み込みに失敗しました。再読み込みしてください。");
       } finally {
         setLoading(false);
@@ -162,7 +164,8 @@ function useStorage() {
     try {
       await window.storage.set(key, JSON.stringify(value), true);
       setError("");
-    } catch {
+    } catch (err) {
+      console.error(`[保存エラー] key="${key}":`, err);
       setError("保存に失敗しました。通信状況を確認して再度お試しください。");
     }
   }, []);
@@ -915,6 +918,66 @@ function BookingForm({ initial, eventBookings, onSave, onCancel }) {
   );
 }
 
+/* 座席配置の簡易マップ。VIP・カウンター(番号付き)・丸椅子の埋まり具合を視覚化する。
+   「未指定」の人はカウンター枠を共有するが具体的な番号は持たないため、
+   空いている番号の席に薄い色で仮に割り当てて表示する(実際の座席番号を保証するものではない)。 */
+function SeatMap({ bookingsForEvent }) {
+  const totals = seatTypeTotals(bookingsForEvent);
+  const reservedSeats = usedCounterSeats(bookingsForEvent);
+  const emptyNumbers = [1, 2, 3, 4, 5, 6, 7, 8].filter((n) => !reservedSeats.has(n));
+  const genericFillCount = Math.max(totals.counterOccupancy - reservedSeats.size, 0);
+  const genericFilled = new Set(emptyNumbers.slice(0, genericFillCount));
+
+  const seatCircle = (key, label, filled, tone) => (
+    <div
+      key={key}
+      style={{
+        width: "30px",
+        height: "30px",
+        borderRadius: "50%",
+        display: "flex",
+        alignItems: "center",
+        justifyContent: "center",
+        fontFamily: "'Zen Maru Gothic'",
+        fontSize: "0.75rem",
+        fontWeight: 700,
+        flexShrink: 0,
+        background: filled ? tone : "transparent",
+        color: filled ? COLORS.cream : COLORS.muted,
+        border: `1px solid ${filled ? tone : COLORS.line}`,
+      }}
+    >
+      {label}
+    </div>
+  );
+
+  return (
+    <div style={{ background: COLORS.surface2, border: `1px solid ${COLORS.line}`, borderRadius: "10px", padding: "0.9rem", marginBottom: "1rem" }}>
+      <div style={{ marginBottom: "0.6rem" }}>
+        <div style={{ color: COLORS.muted, fontFamily: "'Zen Maru Gothic'", fontSize: "0.75rem", marginBottom: "0.35rem" }}>VIP(4席)</div>
+        <div style={{ display: "flex", gap: "0.4rem", flexWrap: "wrap" }}>
+          {[1, 2, 3, 4].map((i) => seatCircle(`vip-${i}`, "", i <= totals.vip, COLORS.gold))}
+        </div>
+      </div>
+      <div style={{ marginBottom: "0.6rem" }}>
+        <div style={{ color: COLORS.muted, fontFamily: "'Zen Maru Gothic'", fontSize: "0.75rem", marginBottom: "0.35rem" }}>
+          カウンター(8席・濃い色=指定席予約 / 薄い色=未指定の自動割当)
+        </div>
+        <div style={{ display: "flex", gap: "0.4rem", flexWrap: "wrap" }}>
+          {[1, 2, 3, 4, 5, 6, 7, 8].map((n) => {
+            if (reservedSeats.has(n)) return seatCircle(`c-${n}`, CIRCLED_NUMBERS[n - 1], true, COLORS.gold);
+            if (genericFilled.has(n)) return seatCircle(`c-${n}`, CIRCLED_NUMBERS[n - 1], true, COLORS.surface);
+            return seatCircle(`c-${n}`, CIRCLED_NUMBERS[n - 1], false, COLORS.line);
+          })}
+        </div>
+      </div>
+      {totals.stool > 0 && (
+        <div style={{ color: COLORS.muted, fontFamily: "'Zen Maru Gothic'", fontSize: "0.8rem" }}>丸椅子:{totals.stool}名(席数の上限なし)</div>
+      )}
+    </div>
+  );
+}
+
 function BookingList({ event, bookings, onAdd, onUpdate, onDelete }) {
   const [adding, setAdding] = useState(false);
   const [editingId, setEditingId] = useState(null);
@@ -925,6 +988,7 @@ function BookingList({ event, bookings, onAdd, onUpdate, onDelete }) {
 
   return (
     <div>
+      <SeatMap bookingsForEvent={rawList} />
       <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "0.9rem", flexWrap: "wrap", gap: "0.5rem" }}>
         <SeatSummary bookingsForEvent={rawList} />
         {!adding && (
