@@ -1768,6 +1768,42 @@ function EventsTab({ events, participants, bookings, onUpdateEvents, onUpdateBoo
             </div>
           );
         })}
+        {searching && (() => {
+          const matchingBookings = bookings.filter((b) => matchesQuery(b.name, searchQuery));
+          if (matchingBookings.length === 0) return null;
+          return (
+            <div style={{ marginTop: "1.4rem" }}>
+              <div style={{ color: COLORS.muted, fontFamily: "'Zen Maru Gothic'", fontSize: "0.75rem", marginBottom: "0.5rem" }}>予約者</div>
+              {matchingBookings.map((b) => {
+                const ev = events.find((e) => e.id === b.eventId);
+                return (
+                  <TicketCard
+                    key={b.id}
+                    left={
+                      <div>
+                        <div style={{ fontFamily: "'Zen Maru Gothic'", fontWeight: 600, color: COLORS.cream }}>
+                          {b.name} <span style={{ color: COLORS.muted }}>({b.count}名)</span>
+                        </div>
+                        {ev && (
+                          <div style={{ fontFamily: "'Zen Maru Gothic'", color: COLORS.gold, fontSize: "0.8rem", marginTop: "0.2rem" }}>
+                            {formatDate(ev.date)}{ev.note ? ` ・ ${ev.note}` : ""}
+                          </div>
+                        )}
+                      </div>
+                    }
+                    right={
+                      ev && (
+                        <button onClick={() => { setViewingId(ev.id); setSearchQuery(""); }} style={iconBtnStyle}>
+                          この日程を開く
+                        </button>
+                      )
+                    }
+                  />
+                );
+              })}
+            </div>
+          );
+        })()}
       </div>
 
       {assignEvent && (
@@ -2171,8 +2207,7 @@ function AdminDashboard({ store, onLogout }) {
   const [tab, setTab] = useState("events");
   const tabs = [
     { key: "log", label: "入力ログ" },
-    { key: "bookings", label: "予約管理" },
-    { key: "events", label: "日程管理" },
+    { key: "events", label: "予約管理" },
     { key: "roster", label: "出演者名簿" },
     { key: "settings", label: "設定" },
   ];
@@ -2211,9 +2246,6 @@ function AdminDashboard({ store, onLogout }) {
         />
       )}
       {tab === "roster" && <RosterTab participants={store.participants} onUpdateParticipants={store.updateParticipants} />}
-      {tab === "bookings" && (
-        <AllBookingsTab events={store.events} participants={store.participants} bookings={store.bookings} onUpdateBookings={store.updateBookings} />
-      )}
       {tab === "settings" && <SettingsTab adminPin={store.adminPin} onUpdateAdminPin={store.updateAdminPin} />}
       {tab === "log" && <BookingLogTab events={store.events} bookings={store.bookings} />}
     </div>
