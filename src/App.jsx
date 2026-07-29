@@ -523,8 +523,8 @@ function SeatSummary({ bookingsForEvent }) {
   const totals = seatTypeTotals(bookingsForEvent);
   return (
     <div style={{ display: "flex", gap: "0.35rem", flexWrap: "wrap" }}>
-      <Badge tone="vip">VIP {totals.vip}名</Badge>
-      <Badge tone="gold">カウンター {totals.counterOccupancy}名</Badge>
+      <Badge tone="vip">VIP {totals.vip}/{SEAT_TYPES.vip.cap}</Badge>
+      <Badge tone="gold">カウンター {totals.counterOccupancy}/{SEAT_TYPES.counter.cap}</Badge>
       {totals.stool > 0 && <Badge tone="muted">丸椅子 {totals.stool}名</Badge>}
     </div>
   );
