@@ -1,31 +1,33 @@
 import React, { useState, useEffect, useCallback } from "react";
 
 /* ============================================================
-   楽屋口 — 出演者予約管理
+   Fantastic Cabaret 予約管理
    トークン:
-   bg      #14171F  (幕が下りた劇場の暗がり)
-   surface #1E2230  (パネル)
-   gold    #D4A24E  (マーキー電球のゴールド)
-   cream   #F2EDE4  (地の文字色)
-   muted   #8891A8  (補助テキスト)
-   danger  #C1554A  (削除・警告=チケットの検認スタンプ)
+   bg      #121214  (ダークグレー・目に優しい背景)
+   surface #1B1B1E  (パネル)
+   gold    #FFFFFF  (白・選択/塗りつぶし用アクセント)
+   ink     #17171A  (白背景の上で使う濃色文字)
+   cream   #EDEDEA  (地の文字色)
+   muted   #96969B  (補助テキスト)
+   danger  #E2574A  (削除・警告)
+   vip     #E8B23D  (VIP識別用アクセント)
    display: 'Mochiy Pop One' (マーキー文字)
    body:    'Zen Maru Gothic'
-   mono:    'Zen Maru Gothic' (PIN・日付などの数字)
 ============================================================ */
 
 const FONT_IMPORT = `@import url('https://fonts.googleapis.com/css2?family=Mochiy+Pop+One&family=Zen+Maru+Gothic:wght@400;500;700;900&display=swap');`;
 
 const COLORS = {
-  bg: "#0F241A",
-  surface: "#183524",
-  surface2: "#1F402C",
-  gold: "#C6473A",
+  bg: "#121214",
+  surface: "#1B1B1E",
+  surface2: "#232327",
+  gold: "#FFFFFF",
   vip: "#E8B23D",
-  cream: "#F5F1E6",
-  muted: "#9FB8A8",
+  ink: "#17171A",
+  cream: "#EDEDEA",
+  muted: "#96969B",
   danger: "#E2574A",
-  line: "#2C4A38",
+  line: "#303035",
 };
 
 function uid() {
@@ -358,7 +360,7 @@ function Marquee({ children, size = "2.6rem" }) {
         fontSize: size,
         letterSpacing: "0.08em",
         color: COLORS.gold,
-        textShadow: "0 0 18px rgba(198,71,58,0.35)",
+        textShadow: "0 0 18px rgba(255,255,255,0.25)",
         margin: 0,
       }}
     >
@@ -369,7 +371,7 @@ function Marquee({ children, size = "2.6rem" }) {
 
 function Button({ children, onClick, variant = "gold", full, type = "button", disabled }) {
   const styles = {
-    gold: { background: COLORS.gold, color: COLORS.cream, border: "none" },
+    gold: { background: COLORS.gold, color: COLORS.ink, border: "none" },
     ghost: { background: "transparent", color: COLORS.cream, border: `1px solid ${COLORS.line}` },
     danger: { background: "transparent", color: COLORS.danger, border: `1px solid ${COLORS.danger}` },
   };
@@ -957,9 +959,9 @@ function BookingForm({ initial, eventBookings, onSave, onCancel }) {
                 }}
                 style={{
                   position: "relative",
-                  background: seatType === o.key ? (o.key === "vip" ? COLORS.vip : COLORS.gold) : "transparent",
-                  color: COLORS.cream,
-                  border: `1px solid ${seatType === o.key ? (o.key === "vip" ? COLORS.vip : COLORS.gold) : COLORS.line}`,
+                  background: seatType === o.key ? COLORS.gold : "transparent",
+                  color: seatType === o.key ? COLORS.ink : COLORS.cream,
+                  border: `1px solid ${seatType === o.key ? COLORS.gold : COLORS.line}`,
                   borderRadius: "8px",
                   padding: "0.55rem 0.5rem",
                   fontFamily: "'Zen Maru Gothic'",
@@ -1023,7 +1025,7 @@ function BookingForm({ initial, eventBookings, onSave, onCancel }) {
                   style={{
                     position: "relative",
                     background: inSelectedRange ? COLORS.gold : "transparent",
-                    color: COLORS.cream,
+                    color: inSelectedRange ? COLORS.ink : COLORS.cream,
                     border: `1px solid ${inSelectedRange ? COLORS.gold : COLORS.line}`,
                     borderRadius: "8px",
                     padding: "0.5rem 0",
@@ -1270,7 +1272,7 @@ function ParticipantDashboard({ participant, participants, onUpdateParticipants,
             onClick={() => setTab(t.key)}
             style={{
               background: tab === t.key ? COLORS.gold : "transparent",
-              color: tab === t.key ? COLORS.cream : COLORS.muted,
+              color: tab === t.key ? COLORS.ink : COLORS.muted,
               border: `1px solid ${tab === t.key ? COLORS.gold : COLORS.line}`,
               borderRadius: "999px",
               padding: "0.4rem 0.9rem",
@@ -1358,7 +1360,7 @@ function AssignModal({ event, participants, onToggle, onClose }) {
                 onClick={() => onToggle(p.id)}
                 style={{
                   background: COLORS.gold,
-                  color: COLORS.cream,
+                  color: COLORS.ink,
                   border: "none",
                   borderRadius: "999px",
                   padding: "0.25rem 0.7rem",
@@ -1487,7 +1489,7 @@ function MiniCalendar({ year, month, selectedDates, onToggleDate, onPrevMonth, o
               style={{
                 aspectRatio: "1",
                 background: selected ? COLORS.gold : "transparent",
-                color: COLORS.cream,
+                color: selected ? COLORS.ink : COLORS.cream,
                 border: `1px solid ${selected ? COLORS.gold : COLORS.line}`,
                 borderRadius: "6px",
                 fontFamily: "'Zen Maru Gothic'",
@@ -2221,7 +2223,7 @@ function AdminDashboard({ store, onLogout }) {
             onClick={() => setTab(t.key)}
             style={{
               background: tab === t.key ? COLORS.gold : "transparent",
-              color: tab === t.key ? COLORS.cream : COLORS.muted,
+              color: tab === t.key ? COLORS.ink : COLORS.muted,
               border: `1px solid ${tab === t.key ? COLORS.gold : COLORS.line}`,
               borderRadius: "999px",
               padding: "0.4rem 0.9rem",
